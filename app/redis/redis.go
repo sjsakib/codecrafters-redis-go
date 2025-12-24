@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 )
@@ -26,8 +27,19 @@ func (r *server) Start() error {
 
 	go func() {
 		for req := range requestChan {
-			result := "+PONG\r\n"
-			req.res <- result
+			switch req.Command[0] {
+			case "PING":
+				req.res <- "+PONG\r\n"
+			case "ECHO":
+				if len(req.Command) < 2 {
+					req.res <- "-ERR wrong number of arguments for 'ECHO' command\r\n"
+					continue
+				}
+				result := fmt.Sprintf("%s", encodeBulkString(req.Command[1]))
+				req.res <- result
+			default:
+				req.res <- "-ERR unknown command\r\n"
+			}
 		}
 	}()
 
@@ -64,7 +76,12 @@ func (r *server) handleConnection(conn net.Conn, requestChan chan Request) {
 			return
 		}
 
-		command := []string{string(buffer[:n])}
+		command, err := parseCommand(bytes.NewReader(buffer[:n]))
+
+		if err != nil {
+			fmt.Printf("Error parsing command: %s\n", err)
+			return
+		}
 
 		resChan := make(chan string)
 		requestChan <- Request{
