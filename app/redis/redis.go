@@ -25,6 +25,8 @@ type Request struct {
 func (r *server) Start() error {
 	requestChan := make(chan Request, 100)
 
+	storage := make(map[string]string)
+
 	go func() {
 		for req := range requestChan {
 			switch req.Command[0] {
@@ -36,6 +38,25 @@ func (r *server) Start() error {
 					continue
 				}
 				result := fmt.Sprintf("%s", encodeBulkString(req.Command[1]))
+				req.res <- result
+			case "SET":
+				if len(req.Command) < 3 {
+					req.res <- "-ERR wrong number of arguments for 'SET' command\r\n"
+					continue
+				}
+				storage[req.Command[1]] = req.Command[2]
+				req.res <- "+OK\r\n"
+			case "GET":
+				if len(req.Command) < 2 {
+					req.res <- "-ERR wrong number of arguments for 'GET' command\r\n"
+					continue
+				}
+				value, exists := storage[req.Command[1]]
+				if !exists {
+					req.res <- "$-1\r\n"
+					continue
+				}
+				result := fmt.Sprintf("%s", encodeBulkString(value))
 				req.res <- result
 			default:
 				req.res <- "-ERR unknown command\r\n"
