@@ -64,6 +64,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		return e.handleBLPop(req)
 	case "TYPE":
 		resp.Data = e.handleType(command)
+	case "XADD":
+		resp.Data = e.handleXAdd(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -276,7 +278,38 @@ func (e *engine) handleType(command []string) []byte {
 		return encodeSimpleString("string")
 	case []any:
 		return encodeSimpleString("list")
+	case *Stream:
+		return encodeSimpleString("stream")
 	default:
 		return encodeSimpleString("unknown")
 	}
 }
+
+func (e *engine) handleXAdd(command []string) []byte {
+	if len(command) < 2 {
+		return encodeInvalidArgCount(command[0])
+	}
+
+	stream, err := e.storage.GetOrMakeStream(command[1])
+	if err != nil {
+		return encodeError(err)
+	}
+
+	entry := StreamEntry{
+		ID:     command[2],
+		Fields: make(map[string]string),
+	}
+	
+	for i := 3; i < len(command); i += 2 {
+		if i+1 >= len(command) {
+			return encodeErrorMessage("XADD requires field-value pairs")
+		}
+		entry.Fields[command[i]] = command[i+1]
+	}
+
+	stream.Entries = append(stream.Entries, entry)
+	e.storage.Set(command[1], stream)
+
+	return encodeResp(entry.ID)
+}
+
