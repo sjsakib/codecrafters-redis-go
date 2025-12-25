@@ -52,17 +52,18 @@ func (e *engine) Handle(input []byte) []byte {
 		if len(command) < 3 {
 			return []byte("-ERR wrong number of arguments for 'RPUSH' command\r\n")
 		}
-		// For simplicity, we treat lists as strings concatenated with commas
+
 		existingValue, ok := e.storage.Get(command[1])
 		if !ok {
-			e.storage.Set(command[1], []any{command[2]})
-			return []byte(encodeResp(1))
+			existingValue = make([]any, 0)
 		}
 		list, ok := existingValue.([]any)
 		if !ok {
 			return []byte("-ERR value is not a list\r\n")
 		}
-		list = append(list, command[2])
+		for i := 2; i < len(command); i++ {
+			list = append(list, command[i])
+		}
 		e.storage.Set(command[1], list)
 		return []byte(encodeResp(len(list)))
 	default:
