@@ -49,74 +49,11 @@ func (e *engine) Handle(input []byte) []byte {
 		result := encodeResp(value)
 		return []byte(result)
 	case "RPUSH":
-		if len(command) < 3 {
-			return []byte("-ERR wrong number of arguments for 'RPUSH' command\r\n")
-		}
-
-		existingValue, ok := e.storage.Get(command[1])
-		if !ok {
-			existingValue = make([]any, 0)
-		}
-		list, ok := existingValue.([]any)
-		if !ok {
-			return []byte("-ERR value is not a list\r\n")
-		}
-		for i := 2; i < len(command); i++ {
-			list = append(list, command[i])
-		}
-		e.storage.Set(command[1], list)
-		return []byte(encodeResp(len(list)))
+		return e.handleRPushCommand(command)
 	case "LRANGE":
-		if len(command) < 4 {
-			return []byte("-ERR wrong number of arguments for 'LRANGE' command\r\n")
-		}
-		existingValue, ok := e.storage.Get(command[1])
-		if !ok {
-			return []byte(encodeResp([]any{}))
-		}
-		list, ok := existingValue.([]any)
-		if !ok {
-			return []byte("-ERR value is not a list\r\n")
-		}
-		var start, end int
-		fmt.Sscanf(command[2], "%d", &start)
-		fmt.Sscanf(command[3], "%d", &end)
-
-		if start < 0 {
-			start = len(list) + start
-		}
-		if end < 0 {
-			end = len(list) + end
-		}
-		if start < 0 {
-			start = 0
-		}
-		if end >= len(list) {
-			end = len(list) - 1
-		}
-		if start > end || start >= len(list) {
-			return []byte(encodeResp([]any{}))
-		}
-
-		return []byte(encodeResp(list[start : end+1]))
+		return e.handleLRangeCommand(command)
 	case "LPUSH":
-		if len(command) < 3 {
-			return []byte("-ERR wrong number of arguments for 'LPUSH' command\r\n")
-		}
-		
-		existingValue, ok := e.storage.Get(command[1])
-		if !ok {
-			existingValue = make([]any, 0)
-		}
-		list, ok := existingValue.([]any)
-		if !ok {
-			return []byte("-ERR value is not a list\r\n")
-		}
-		for i := 2; i < len(command); i++ {
-			list = append([]any{command[i]}, list...)
-		}
-		e.storage.Set(command[1], list)
-		return []byte(encodeResp(len(list)))
+		return e.handleLPushCommand(command)
 	default:
 		return []byte("-ERR unknown command\r\n")
 	}
@@ -141,5 +78,73 @@ func (e *engine) handleSetCommand(command []string) []byte {
 		}
 	}
 	return []byte("+OK\r\n")
+
+}
+
+func (e *engine) handleRPushCommand(command []string) []byte {
+	if len(command) < 3 {
+		return []byte("-ERR wrong number of arguments for 'RPUSH' command\r\n")
+	}
+
+	list, err := e.storage.GetOrMakeList(command[1])
+
+	if err != nil {
+		return encodeError(err)
+	}
+	for i := 2; i < len(command); i++ {
+		list = append(list, command[i])
+	}
+	e.storage.Set(command[1], list)
+	return []byte(encodeResp(len(list)))
+}
+
+func (e *engine) handleLPushCommand(command []string) []byte {
+	if len(command) < 3 {
+		return []byte("-ERR wrong number of arguments for 'LPUSH' command\r\n")
+	}
+	list, err := e.storage.GetOrMakeList(command[1])
+	if err != nil {
+		return encodeError(err)
+	}
+	for i := 2; i < len(command); i++ {
+		list = append([]any{command[i]}, list...)
+	}
+	e.storage.Set(command[1], list)
+	return []byte(encodeResp(len(list)))
+}
+
+func (e *engine) handleLRangeCommand(command []string) []byte {
+	if len(command) < 4 {
+		return []byte("-ERR wrong number of arguments for 'LRANGE' command\r\n")
+	}
+	existingValue, ok := e.storage.Get(command[1])
+	if !ok {
+		return []byte(encodeResp([]any{}))
+	}
+	list, ok := existingValue.([]any)
+	if !ok {
+		return []byte("-ERR value is not a list\r\n")
+	}
+	var start, end int
+	fmt.Sscanf(command[2], "%d", &start)
+	fmt.Sscanf(command[3], "%d", &end)
+
+	if start < 0 {
+		start = len(list) + start
+	}
+	if end < 0 {
+		end = len(list) + end
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end >= len(list) {
+		end = len(list) - 1
+	}
+	if start > end || start >= len(list) {
+		return []byte(encodeResp([]any{}))
+	}
+
+	return []byte(encodeResp(list[start : end+1]))
 
 }

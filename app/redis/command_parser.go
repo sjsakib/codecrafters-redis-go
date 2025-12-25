@@ -66,3 +66,14 @@ func encodeResp(val any) string {
 func encodeBulkString(s string) string {
 	return fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
 }
+
+func encodeError(err error) []byte {
+	switch err {
+	case ErrWrongType:
+		return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n")
+	case ErrKeyNotFound:
+		return []byte("$-1\r\n")
+	default:
+		return fmt.Appendf(nil, "-ERR %s\r\n", err.Error())
+	}
+}
