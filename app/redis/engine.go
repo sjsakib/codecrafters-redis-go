@@ -63,6 +63,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleLPopCommand(command)
 	case "BLPOP":
 		return e.handleBLPop(req)
+	case "TYPE":
+		resp.Data = e.handleType(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -232,13 +234,12 @@ func (e *engine) handleBLPop(req *RawReq) *RawResp {
 		return &resp
 	}
 
-	timeoutTime := req.timeStamp.Add(time.Duration(timeoutSec * 1000)*time.Millisecond)
+	timeoutTime := req.timeStamp.Add(time.Duration(timeoutSec*1000) * time.Millisecond)
 
 	if timeoutSec != 0 && timeoutTime.Before(time.Now()) {
 		resp.Data = encodeNullArray()
 		return &resp
 	}
-
 
 	list, err := e.storage.GetOrMakeList(command[1])
 
@@ -259,4 +260,24 @@ func (e *engine) handleBLPop(req *RawReq) *RawResp {
 	resp.RetryWait = &wait
 
 	return &resp
+}
+
+func (e *engine) handleType(command []string) []byte {
+	if len(command) < 2 {
+		return encodeInvalidArgCount(command[0])
+	}
+
+	value, exists := e.storage.Get(command[1])
+	if !exists {
+		return encodeSimpleString("none")
+	}
+
+	switch value.(type) {
+	case string:
+		return encodeSimpleString("string")
+	case []any:
+		return encodeSimpleString("list")
+	default:
+		return encodeSimpleString("unknown")
+	}
 }
