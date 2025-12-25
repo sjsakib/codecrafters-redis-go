@@ -66,6 +66,39 @@ func (e *engine) Handle(input []byte) []byte {
 		}
 		e.storage.Set(command[1], list)
 		return []byte(encodeResp(len(list)))
+	case "LRANGE":
+		if len(command) < 4 {
+			return []byte("-ERR wrong number of arguments for 'LRANGE' command\r\n")
+		}
+		existingValue, ok := e.storage.Get(command[1])
+		if !ok {
+			return []byte(encodeResp([]any{}))
+		}
+		list, ok := existingValue.([]any)
+		if !ok {
+			return []byte("-ERR value is not a list\r\n")
+		}
+		var start, end int
+		fmt.Sscanf(command[2], "%d", &start)
+		fmt.Sscanf(command[3], "%d", &end)
+
+		if start < 0 {
+			start = len(list) + start
+		}
+		if end < 0 {
+			end = len(list) + end
+		}
+		if start < 0 {
+			start = 0
+		}
+		if end >= len(list) {
+			end = len(list) - 1
+		}
+		if start > end || start >= len(list) {
+			return []byte(encodeResp([]any{}))
+		}
+
+		return []byte(encodeResp(list[start : end+1]))
 	default:
 		return []byte("-ERR unknown command\r\n")
 	}
