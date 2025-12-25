@@ -54,6 +54,8 @@ func (e *engine) Handle(input []byte) []byte {
 		return e.handleLRangeCommand(command)
 	case "LPUSH":
 		return e.handleLPushCommand(command)
+	case "LLEN":
+		return e.handleLLen(command)
 	default:
 		return []byte("-ERR unknown command\r\n")
 	}
@@ -146,5 +148,18 @@ func (e *engine) handleLRangeCommand(command []string) []byte {
 	}
 
 	return []byte(encodeResp(list[start : end+1]))
+
+}
+
+func (e *engine) handleLLen(command []string) []byte {
+	if len(command) < 2 {
+		return []byte("-ERR wrong number of arguments for 'LLEN' command\r\n")
+	}
+	list, err := e.storage.GetOrMakeList(command[1])
+
+	if err != nil {
+		return encodeError(err)
+	}
+	return []byte(encodeResp(len(list)))
 
 }
