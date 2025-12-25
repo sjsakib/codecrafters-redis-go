@@ -182,8 +182,26 @@ func (e *engine) handleLPopCommand(command []string) []byte {
 		return encodeNull()
 	}
 
-	poppedValue := list[0]
-	list = list[1:]
+	popCount := 1
+	if len(command) >= 3 {
+		_, err := fmt.Sscanf(command[2], "%d", &popCount)
+		if err != nil {
+			return []byte("-ERR count must be an integer\r\n")
+		}
+		if popCount < 1 {
+			return []byte("-ERR count must be positive\r\n")
+		}
+		if popCount > len(list) {
+			popCount = len(list)
+		}
+	}
+
+	poppedValues := list[:popCount]
+	list = list[popCount:]
 	e.storage.Set(command[1], list)
-	return []byte(encodeResp(poppedValue))
+
+	if popCount == 1 {
+		return []byte(encodeResp(poppedValues[0]))
+	}
+	return []byte(encodeResp(poppedValues))
 }
