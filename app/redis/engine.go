@@ -221,8 +221,8 @@ func (e *engine) handleBLPop(req *RawReq) *RawResp {
 		return &resp
 	}
 
-	var timeoutSec int
-	_, err = fmt.Sscanf(command[2], "%d", &timeoutSec)
+	var timeoutSec float32
+	_, err = fmt.Sscanf(command[2], "%f", &timeoutSec)
 	if err != nil {
 		resp.Data = encodeErrorMessage("timeout must be an integer")
 		return &resp
@@ -232,7 +232,7 @@ func (e *engine) handleBLPop(req *RawReq) *RawResp {
 		return &resp
 	}
 
-	timeoutTime := req.timeStamp.Add(time.Duration(timeoutSec)*time.Second)
+	timeoutTime := req.timeStamp.Add(time.Duration(timeoutSec * 1000)*time.Millisecond)
 
 	if timeoutSec != 0 && timeoutTime.Before(time.Now()) {
 		resp.Data = encodeNullArray()
