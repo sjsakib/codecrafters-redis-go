@@ -77,3 +77,8 @@ func encodeError(err error) []byte {
 		return fmt.Appendf(nil, "-ERR %s\r\n", err.Error())
 	}
 }
+
+func encodeNull() []byte {
+	return []byte("$-1\r\n")
+}
+

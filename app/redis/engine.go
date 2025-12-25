@@ -44,7 +44,7 @@ func (e *engine) Handle(input []byte) []byte {
 		}
 		value, exists := e.storage.Get(command[1])
 		if !exists {
-			return []byte("$-1\r\n")
+			return encodeNull()
 		}
 		result := encodeResp(value)
 		return []byte(result)
@@ -56,6 +56,8 @@ func (e *engine) Handle(input []byte) []byte {
 		return e.handleLPushCommand(command)
 	case "LLEN":
 		return e.handleLLen(command)
+	case "LPOP":
+		return e.handleLPopCommand(command)
 	default:
 		return []byte("-ERR unknown command\r\n")
 	}
@@ -162,4 +164,26 @@ func (e *engine) handleLLen(command []string) []byte {
 	}
 	return []byte(encodeResp(len(list)))
 
+}
+
+func (e *engine) handleLPopCommand(command []string) []byte {
+	if len(command) < 2 {
+		return []byte("-ERR wrong number of arguments for 'LPOP' command\r\n")
+	}
+	existingValue, ok := e.storage.Get(command[1])
+	if !ok {
+		return encodeNull()
+	}
+	list, ok := existingValue.([]any)
+	if !ok {
+		return encodeError(ErrWrongType)
+	}
+	if len(list) == 0 {
+		return encodeNull()
+	}
+
+	poppedValue := list[0]
+	list = list[1:]
+	e.storage.Set(command[1], list)
+	return []byte(encodeResp(poppedValue))
 }
