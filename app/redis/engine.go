@@ -99,6 +99,24 @@ func (e *engine) Handle(input []byte) []byte {
 		}
 
 		return []byte(encodeResp(list[start : end+1]))
+	case "LPUSH":
+		if len(command) < 3 {
+			return []byte("-ERR wrong number of arguments for 'LPUSH' command\r\n")
+		}
+		
+		existingValue, ok := e.storage.Get(command[1])
+		if !ok {
+			existingValue = make([]any, 0)
+		}
+		list, ok := existingValue.([]any)
+		if !ok {
+			return []byte("-ERR value is not a list\r\n")
+		}
+		for i := 2; i < len(command); i++ {
+			list = append([]any{command[i]}, list...)
+		}
+		e.storage.Set(command[1], list)
+		return []byte(encodeResp(len(list)))
 	default:
 		return []byte("-ERR unknown command\r\n")
 	}
