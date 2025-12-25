@@ -56,7 +56,7 @@ func (s *inMemoryStorage) GetList(key string) ([]any, error) {
 func (s *inMemoryStorage) GetOrMakeList(key string) ([]any, error) {
 	value, exists := s.data[key]
 	if !exists {
-		return make([]any, 0), nil
+		return make([]any, 0, 10), nil
 	}
 	list, ok := value.([]any)
 	if !ok {

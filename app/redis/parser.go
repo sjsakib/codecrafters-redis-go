@@ -45,26 +45,26 @@ func parseCommand(reader *bytes.Reader) ([]string, error) {
 
 }
 
-func encodeResp(val any) string {
+func encodeResp(val any) []byte {
 	switch v := val.(type) {
 	case string:
 		return encodeBulkString(v)
 	case int:
-		return fmt.Sprintf(":%d\r\n", v)
+		return fmt.Appendf(nil, ":%d\r\n", v)
 	case []any:
 		var buffer bytes.Buffer
 		fmt.Fprintf(&buffer, "*%d\r\n", len(v))
 		for _, item := range v {
-			buffer.WriteString(encodeResp(item))
+			buffer.Write(encodeResp(item))
 		}
-		return buffer.String()
+		return buffer.Bytes()
 	default:
-		return "-ERR unknown type\r\n"
+		return encodeErrorMessage("failed to encode response: unknown type")
 	}
 }
 
-func encodeBulkString(s string) string {
-	return fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
+func encodeBulkString(s string) []byte {
+	return fmt.Appendf(nil, "$%d\r\n%s\r\n", len(s), s)
 }
 
 func encodeError(err error) []byte {
@@ -81,4 +81,18 @@ func encodeError(err error) []byte {
 func encodeNull() []byte {
 	return []byte("$-1\r\n")
 }
+func encodeNullArray() []byte {
+	return []byte("*-1\r\n")
+}
 
+func encodeErrorMessage(message string) []byte {
+	return fmt.Appendf(nil, "-ERR %s\r\n", message)
+}
+
+func encodeSimpleString(s string) []byte {
+	return fmt.Appendf(nil, "+%s\r\n", s)
+}
+
+func encodeInvalidArgCount(command string) []byte {
+	return fmt.Appendf(nil, "-ERR wrong number of arguments for '%s' command\r\n", command)
+}

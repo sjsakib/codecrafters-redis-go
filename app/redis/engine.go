@@ -7,7 +7,7 @@ import (
 )
 
 type Engine interface {
-	Handle(input []byte) []byte
+	Handle(req *RawReq) *RawResp
 }
 
 type engine struct {
@@ -20,52 +20,59 @@ func NewEngine(storage Storage) Engine {
 	}
 }
 
-func (e *engine) Handle(input []byte) []byte {
-	command, err := parseCommand(bytes.NewReader(input))
+func (e *engine) Handle(req *RawReq) *RawResp {
+	command, err := parseCommand(bytes.NewReader(req.input))
+
+	resp := RawResp{}
 
 	if err != nil {
-		return fmt.Appendf(nil, "-ERR Failed to parse command: %s\r\n", err)
+		resp.Data = encodeErrorMessage(fmt.Sprintf("Failed to parse command: %s", err))
+		return &resp
 	}
 
 	switch command[0] {
 	case "PING":
-		return []byte("+PONG\r\n")
+		resp.Data = encodeSimpleString("PONG")
 	case "ECHO":
 		if len(command) < 2 {
-			return []byte("-ERR wrong number of arguments for 'ECHO' command\r\n")
+			resp.Data = encodeErrorMessage("wrong number of arguments for 'ECHO' command")
 		}
-		result := encodeBulkString(command[1])
-		return []byte(result)
+		resp.Data = encodeBulkString(command[1])
 	case "SET":
-		return e.handleSetCommand(command)
+		resp.Data = e.handleSetCommand(command)
 	case "GET":
 		if len(command) < 2 {
-			return []byte("-ERR wrong number of arguments for 'GET' command\r\n")
+			resp.Data = encodeInvalidArgCount("GET")
+			break
 		}
 		value, exists := e.storage.Get(command[1])
 		if !exists {
-			return encodeNull()
+			resp.Data = encodeNull()
+			break
 		}
-		result := encodeResp(value)
-		return []byte(result)
+		resp.Data = encodeResp(value)
 	case "RPUSH":
-		return e.handleRPushCommand(command)
+		resp.Data = e.handleRPushCommand(command)
 	case "LRANGE":
-		return e.handleLRangeCommand(command)
+		resp.Data = e.handleLRangeCommand(command)
 	case "LPUSH":
-		return e.handleLPushCommand(command)
+		resp.Data = e.handleLPushCommand(command)
 	case "LLEN":
-		return e.handleLLen(command)
+		resp.Data = e.handleLLen(command)
 	case "LPOP":
-		return e.handleLPopCommand(command)
+		resp.Data = e.handleLPopCommand(command)
+	case "BLPOP":
+		return e.handleBLPop(req)
 	default:
-		return []byte("-ERR unknown command\r\n")
+		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
+
+	return &resp
 }
 
 func (e *engine) handleSetCommand(command []string) []byte {
 	if len(command) < 3 {
-		return []byte("-ERR wrong number of arguments for 'SET' command\r\n")
+		return encodeInvalidArgCount("SET")
 	}
 
 	e.storage.Set(command[1], command[2])
@@ -87,7 +94,7 @@ func (e *engine) handleSetCommand(command []string) []byte {
 
 func (e *engine) handleRPushCommand(command []string) []byte {
 	if len(command) < 3 {
-		return []byte("-ERR wrong number of arguments for 'RPUSH' command\r\n")
+		return encodeInvalidArgCount(command[0])
 	}
 
 	list, err := e.storage.GetOrMakeList(command[1])
@@ -104,7 +111,7 @@ func (e *engine) handleRPushCommand(command []string) []byte {
 
 func (e *engine) handleLPushCommand(command []string) []byte {
 	if len(command) < 3 {
-		return []byte("-ERR wrong number of arguments for 'LPUSH' command\r\n")
+		return encodeInvalidArgCount(command[0])
 	}
 	list, err := e.storage.GetOrMakeList(command[1])
 	if err != nil {
@@ -119,7 +126,7 @@ func (e *engine) handleLPushCommand(command []string) []byte {
 
 func (e *engine) handleLRangeCommand(command []string) []byte {
 	if len(command) < 4 {
-		return []byte("-ERR wrong number of arguments for 'LRANGE' command\r\n")
+		return encodeInvalidArgCount("LRANGE")
 	}
 	existingValue, ok := e.storage.Get(command[1])
 	if !ok {
@@ -127,7 +134,7 @@ func (e *engine) handleLRangeCommand(command []string) []byte {
 	}
 	list, ok := existingValue.([]any)
 	if !ok {
-		return []byte("-ERR value is not a list\r\n")
+		return encodeErrorMessage("value is not a list")
 	}
 	var start, end int
 	fmt.Sscanf(command[2], "%d", &start)
@@ -155,7 +162,7 @@ func (e *engine) handleLRangeCommand(command []string) []byte {
 
 func (e *engine) handleLLen(command []string) []byte {
 	if len(command) < 2 {
-		return []byte("-ERR wrong number of arguments for 'LLEN' command\r\n")
+		return encodeInvalidArgCount(command[0])
 	}
 	list, err := e.storage.GetOrMakeList(command[1])
 
@@ -168,7 +175,7 @@ func (e *engine) handleLLen(command []string) []byte {
 
 func (e *engine) handleLPopCommand(command []string) []byte {
 	if len(command) < 2 {
-		return []byte("-ERR wrong number of arguments for 'LPOP' command\r\n")
+		return encodeInvalidArgCount(command[0])
 	}
 	existingValue, ok := e.storage.Get(command[1])
 	if !ok {
@@ -186,10 +193,10 @@ func (e *engine) handleLPopCommand(command []string) []byte {
 	if len(command) >= 3 {
 		_, err := fmt.Sscanf(command[2], "%d", &popCount)
 		if err != nil {
-			return []byte("-ERR count must be an integer\r\n")
+			return encodeErrorMessage("count must be an integer")
 		}
 		if popCount < 1 {
-			return []byte("-ERR count must be positive\r\n")
+			return encodeErrorMessage("count must be positive")
 		}
 		if popCount > len(list) {
 			popCount = len(list)
@@ -204,4 +211,52 @@ func (e *engine) handleLPopCommand(command []string) []byte {
 		return []byte(encodeResp(poppedValues[0]))
 	}
 	return []byte(encodeResp(poppedValues))
+}
+
+func (e *engine) handleBLPop(req *RawReq) *RawResp {
+	command, err := parseCommand(bytes.NewReader(req.input))
+	resp := RawResp{}
+	if len(command) < 3 {
+		resp.Data = encodeInvalidArgCount(command[0])
+		return &resp
+	}
+
+	var timeoutSec int
+	_, err = fmt.Sscanf(command[2], "%d", &timeoutSec)
+	if err != nil {
+		resp.Data = encodeErrorMessage("timeout must be an integer")
+		return &resp
+	}
+	if timeoutSec < 0 {
+		resp.Data = encodeErrorMessage("timeout must be non-negative")
+		return &resp
+	}
+
+	timeoutTime := req.timeStamp.Add(time.Duration(timeoutSec)*time.Second)
+
+	if timeoutSec != 0 && timeoutTime.Before(time.Now()) {
+		resp.Data = encodeNullArray()
+		return &resp
+	}
+
+
+	list, err := e.storage.GetOrMakeList(command[1])
+
+	if err != nil {
+		resp.Data = encodeError(err)
+		return &resp
+	}
+
+	if len(list) > 0 {
+		poppedValue := list[0]
+		list = list[1:]
+		e.storage.Set(command[1], list)
+		resp.Data = encodeResp([]any{command[1], poppedValue})
+		return &resp
+	}
+
+	wait := (time.Duration(100) * time.Millisecond)
+	resp.RetryWait = &wait
+
+	return &resp
 }

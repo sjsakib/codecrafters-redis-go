@@ -3,11 +3,18 @@ package redis
 import (
 	"fmt"
 	"net"
+	"time"
 )
 
-type RawRequest struct {
-	input []byte
-	res   chan []byte
+type RawReq struct {
+	input     []byte
+	res       chan *RawResp
+	timeStamp time.Time
+}
+
+type RawResp struct {
+	Data      []byte
+	RetryWait *time.Duration
 }
 
 type Server interface {
@@ -25,11 +32,11 @@ func NewServer(engine Engine) Server {
 }
 
 func (m *goroutineMux) Start(address string) error {
-	requestChan := make(chan RawRequest, 100)
+	requestChan := make(chan RawReq, 100)
 
 	go func() {
 		for req := range requestChan {
-			resp := m.engine.Handle(req.input)
+			resp := m.engine.Handle(&req)
 
 			req.res <- resp
 
@@ -52,7 +59,7 @@ func (m *goroutineMux) Start(address string) error {
 	}
 }
 
-func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan RawRequest) {
+func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan RawReq) {
 	defer conn.Close()
 	buffer := make([]byte, 1024) // if the command exceeds 1024 bytes, it will be truncated for now
 
@@ -67,14 +74,24 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan RawReque
 			return
 		}
 
-		resChan := make(chan []byte)
-		requestChan <- RawRequest{
-			input: buffer[:n],
-			res:   resChan,
+		timeStamp := time.Now()
+
+		for {
+			resChan := make(chan *RawResp)
+			requestChan <- RawReq{
+				input:     buffer[:n],
+				res:       resChan,
+				timeStamp: timeStamp,
+			}
+
+			response := <-resChan
+			if response.RetryWait == nil {
+				conn.Write(response.Data)
+				break
+			}
+
+			time.Sleep(*response.RetryWait)
+
 		}
-
-		response := <-resChan
-		conn.Write([]byte(response))
-
 	}
 }
