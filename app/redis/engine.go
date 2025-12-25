@@ -1,7 +1,6 @@
 package redis
 
 import (
-	"bytes"
 	"fmt"
 	"time"
 )
@@ -21,7 +20,7 @@ func NewEngine(storage Storage) Engine {
 }
 
 func (e *engine) Handle(req *RawReq) *RawResp {
-	command, err := parseCommand(bytes.NewReader(req.input))
+	command, err := parseCommand(req.input)
 
 	resp := RawResp{}
 
@@ -216,7 +215,7 @@ func (e *engine) handleLPopCommand(command []string) []byte {
 }
 
 func (e *engine) handleBLPop(req *RawReq) *RawResp {
-	command, err := parseCommand(bytes.NewReader(req.input))
+	command, err := parseCommand(req.input)
 	resp := RawResp{}
 	if len(command) < 3 {
 		resp.Data = encodeInvalidArgCount(command[0])

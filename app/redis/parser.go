@@ -3,11 +3,21 @@ package redis
 import (
 	"bytes"
 	"fmt"
+	"strings"
 )
 
 const intFmtStr = "%d\r\n"
 
-func parseCommand(reader *bytes.Reader) ([]string, error) {
+func parseCommand(input []byte) ([]string, error) {
+	command, err := parse(bytes.NewReader(input))
+	if err != nil {
+		return nil, err
+	}
+	command[0] = strings.ToUpper(command[0])
+	return command, nil
+}
+
+func parse(reader *bytes.Reader) ([]string, error) {
 
 	switch b, err := reader.ReadByte(); b {
 	case '*':
@@ -18,7 +28,7 @@ func parseCommand(reader *bytes.Reader) ([]string, error) {
 		for i := 0; i < numArgs; i++ {
 			var length int
 			fmt.Fscanf(reader, intFmtStr, &length)
-			command, err := parseCommand(reader)
+			command, err := parse(reader)
 
 			if err != nil {
 				return nil, err
