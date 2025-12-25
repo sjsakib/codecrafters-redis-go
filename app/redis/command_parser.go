@@ -45,6 +45,24 @@ func parseCommand(reader *bytes.Reader) ([]string, error) {
 
 }
 
+func encodeResp(val any) string {
+	switch v := val.(type) {
+	case string:
+		return encodeBulkString(v)
+	case int:
+		return fmt.Sprintf(":%d\r\n", v)
+	case []any:
+		var buffer bytes.Buffer
+		fmt.Fprintf(&buffer, "*%d\r\n", len(v))
+		for _, item := range v {
+			buffer.WriteString(encodeResp(item))
+		}
+		return buffer.String()
+	default:
+		return "-ERR unknown type\r\n"
+	}
+}
+
 func encodeBulkString(s string) string {
 	return fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
 }

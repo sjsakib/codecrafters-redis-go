@@ -24,7 +24,7 @@ func (e *engine) Handle(input []byte) []byte {
 	command, err := parseCommand(bytes.NewReader(input))
 
 	if err != nil {
-		return []byte(fmt.Sprintf("-ERR Failed to parse command: %s\r\n", err))
+		return fmt.Appendf(nil, "-ERR Failed to parse command: %s\r\n", err)
 	}
 
 	switch command[0] {
@@ -46,8 +46,25 @@ func (e *engine) Handle(input []byte) []byte {
 		if !exists {
 			return []byte("$-1\r\n")
 		}
-		result := fmt.Sprintf("%s", encodeBulkString(value))
+		result := encodeResp(value)
 		return []byte(result)
+	case "RPUSH":
+		if len(command) < 3 {
+			return []byte("-ERR wrong number of arguments for 'RPUSH' command\r\n")
+		}
+		// For simplicity, we treat lists as strings concatenated with commas
+		existingValue, ok := e.storage.Get(command[1])
+		if !ok {
+			e.storage.Set(command[1], []any{command[2]})
+			return []byte(encodeResp(1))
+		}
+		list, ok := existingValue.([]any)
+		if !ok {
+			return []byte("-ERR value is not a list\r\n")
+		}
+		list = append(list, command[2])
+		e.storage.Set(command[1], list)
+		return []byte(encodeResp(len(list)))
 	default:
 		return []byte("-ERR unknown command\r\n")
 	}
