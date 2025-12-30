@@ -61,16 +61,36 @@ func encodeResp(val any) []byte {
 		return encodeBulkString(v)
 	case int:
 		return fmt.Appendf(nil, ":%d\r\n", v)
-	case []any:
+	case [](any):
+		return encodeArray(v)
+	case []StreamEntry:
+		return encodeArray(v)
+	case StreamEntry:
 		var buffer bytes.Buffer
-		fmt.Fprintf(&buffer, "*%d\r\n", len(v))
-		for _, item := range v {
-			buffer.Write(encodeResp(item))
+		fmt.Fprintf(&buffer, "*2\r\n")
+		buffer.Write(encodeResp(v.ID))
+		fmt.Fprintf(&buffer, "*%d\r\n", len(v.Fields)*2)
+		for field, value := range v.Fields {
+			buffer.Write(encodeResp(field))
+			buffer.Write(encodeResp(value))
 		}
 		return buffer.Bytes()
+	case EntryID:
+		return encodeBulkString(fmt.Sprintf("%d-%d", v.T, v.S))
+	case nil:
+		return encodeNull()
 	default:
 		return encodeErrorMessage("failed to encode response: unknown type")
 	}
+}
+
+func encodeArray[T any](items []T) []byte {
+	var buffer bytes.Buffer
+	fmt.Fprintf(&buffer, "*%d\r\n", len(items))
+	for _, item := range items {
+		buffer.Write(encodeResp(item))
+	}
+	return buffer.Bytes()
 }
 
 func encodeBulkString(s string) []byte {

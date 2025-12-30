@@ -66,6 +66,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleType(command)
 	case "XADD":
 		resp.Data = e.handleXAdd(command)
+	case "XRANGE":
+		resp.Data = e.handleXRange(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -296,15 +298,15 @@ func (e *engine) handleXAdd(command []string) []byte {
 	}
 
 	entry := StreamEntry{
-		ID:     command[2],
+		ID:     EntryID{},
 		Fields: make(map[string]string),
 	}
 
-	validatedID, err := stream.GenerateOrValidateEntryID(entry.ID)
+	validatedID, err := stream.GenerateOrValidateEntryID(command[2])
 	if err != nil {
 		return encodeErrorMessage(err.Error())
 	}
-	entry.ID = validatedID
+	entry.ID = *validatedID
 
 	for i := 3; i < len(command); i += 2 {
 		if i+1 >= len(command) {
@@ -317,4 +319,28 @@ func (e *engine) handleXAdd(command []string) []byte {
 	e.storage.Set(command[1], stream)
 
 	return encodeResp(entry.ID)
+}
+
+func (e *engine) handleXRange(command []string) []byte {
+	if len(command) < 4 {
+		return encodeInvalidArgCount(command[0])
+	}
+
+	stream, err := e.storage.GetOrMakeStream(command[1])
+	if err != nil {
+		return encodeError(err)
+	}
+
+	startID, err := parseRangeID(command[2], true)
+	if err != nil {
+		return encodeError(err)
+	}
+	endID, err := parseRangeID(command[3], false)
+	if err != nil {
+		return encodeError(err)
+	}
+
+	entries := stream.GetRange(startID, endID)
+
+	return encodeResp(entries)
 }

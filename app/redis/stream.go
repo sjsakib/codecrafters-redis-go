@@ -13,22 +13,28 @@ type Stream struct {
 }
 
 type StreamEntry struct {
-	ID     string
+	ID     EntryID
 	Fields map[string]string
 }
 
-func (s *Stream) GenerateOrValidateEntryID(entryID string) (string, error) {
+type EntryID struct {
+	T int64
+	S int64
+}
+
+func (s *Stream) GenerateOrValidateEntryID(entryID string) (*EntryID, error) {
 	regexp, _ := regexp.Compile(`^(\*|(\d+-(\*|\d+)))$`)
 
 	if !regexp.MatchString(entryID) {
-		return "", errors.New("invalid entry id")
+		return nil, errors.New("invalid entry id")
 	}
 
 	var lastTimeStamp int64
 	lastSequence := int64(-1)
 	if len(s.Entries) != 0 {
 		lastEntry := s.Entries[len(s.Entries)-1]
-		fmt.Sscanf(lastEntry.ID, "%d-%d", &lastTimeStamp, &lastSequence)
+		lastTimeStamp = lastEntry.ID.T
+		lastSequence = lastEntry.ID.S
 	}
 
 	newTimeStamp := time.Now().UnixMilli()
@@ -39,7 +45,7 @@ func (s *Stream) GenerateOrValidateEntryID(entryID string) (string, error) {
 		fmt.Sscanf(entryID, "%d-*", &newTimeStamp)
 
 		if newTimeStamp < lastTimeStamp {
-			return "", errors.New("The ID specified in XADD is equal or smaller than the target stream top item")
+			return nil, errors.New("The ID specified in XADD is equal or smaller than the target stream top item")
 		} else if newTimeStamp == lastTimeStamp {
 			newSequence = lastSequence + 1
 		}
@@ -51,15 +57,50 @@ func (s *Stream) GenerateOrValidateEntryID(entryID string) (string, error) {
 		fmt.Sscanf(entryID, "%d-%d", &newTimeStamp, &newSequence)
 
 		if newTimeStamp == 0 && newSequence == 0 {
-			return "", errors.New("The ID specified in XADD must be greater than 0-0")
+			return nil, errors.New("The ID specified in XADD must be greater than 0-0")
 		}
 
 		if newTimeStamp < lastTimeStamp {
-			return "", errors.New("The ID specified in XADD is equal or smaller than the target stream top item")
+			return nil, errors.New("The ID specified in XADD is equal or smaller than the target stream top item")
 		} else if newTimeStamp == lastTimeStamp && newSequence <= lastSequence {
-			return "", errors.New("The ID specified in XADD is equal or smaller than the target stream top item")
+			return nil, errors.New("The ID specified in XADD is equal or smaller than the target stream top item")
 		}
 	}
 
-	return fmt.Sprintf("%d-%d", newTimeStamp, newSequence), nil
+	return &EntryID{T: newTimeStamp, S: newSequence}, nil
+}
+
+func (s *Stream) GetRange(startID, endID EntryID) []StreamEntry {
+	var result []StreamEntry
+	for _, entry := range s.Entries {
+		if (entry.ID.T > startID.T || (entry.ID.T == startID.T && entry.ID.S >= startID.S)) &&
+			(entry.ID.T < endID.T || (entry.ID.T == endID.T && entry.ID.S <= endID.S)) {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+func parseRangeID(idStr string, isStart bool) (EntryID, error) {
+	parts := strings.Split(idStr, "-")
+	var id EntryID
+
+	_, err := fmt.Sscanf(parts[0], "%d", &id.T)
+	if err != nil {
+		return EntryID{}, errors.New("invalid ID format")
+	}
+
+	if len(parts) > 1 {
+		_, err = fmt.Sscanf(parts[1], "%d", &id.S)
+		if err != nil {
+			return EntryID{}, errors.New("invalid ID format")
+		}
+	} else {
+		if isStart {
+			id.S = 0
+		} else {
+			id.S = int64(^uint64(0) >> 1) // max int64
+		}
+	}
+	return id, nil
 }

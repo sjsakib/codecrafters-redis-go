@@ -10,7 +10,7 @@ func TestStream_GenerateOrValidateEntryID(t *testing.T) {
 		stream      *Stream
 		entryID     string
 		expectError bool
-		expectID    string
+		expectID    *EntryID
 	}{
 		{
 			name:        "invalid entry ID format",
@@ -35,7 +35,7 @@ func TestStream_GenerateOrValidateEntryID(t *testing.T) {
 			name: "auto-generate ID with * on existing stream",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-1", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 1}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "*",
@@ -47,35 +47,35 @@ func TestStream_GenerateOrValidateEntryID(t *testing.T) {
 			stream:      &Stream{},
 			entryID:     "1500-*",
 			expectError: false,
-			expectID:    "1500-0",
+			expectID:    &EntryID{T: 1500, S: 0},
 		},
 		{
 			name: "timestamp-* format with valid timestamp greater than last",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-1", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 1}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "1500-*",
 			expectError: false,
-			expectID:    "1500-0",
+			expectID:    &EntryID{T: 1500, S: 0},
 		},
 		{
 			name: "timestamp-* format with timestamp equal to last should fail",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-1", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 1}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "1000-*",
 			expectError: false,
-			expectID:    "1000-2",
+			expectID:    &EntryID{T: 1000, S: 2},
 		},
 		{
 			name: "timestamp-* format with timestamp smaller than last should fail",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-1", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 1}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "500-*",
@@ -86,35 +86,35 @@ func TestStream_GenerateOrValidateEntryID(t *testing.T) {
 			stream:      &Stream{},
 			entryID:     "1000-5",
 			expectError: false,
-			expectID:    "1000-5",
+			expectID:    &EntryID{T: 1000, S: 5},
 		},
 		{
 			name: "explicit timestamp-sequence with greater timestamp",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-1", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 1}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "1500-3",
 			expectError: false,
-			expectID:    "1500-3",
+			expectID:    &EntryID{T: 1500, S: 3},
 		},
 		{
 			name: "explicit timestamp-sequence with same timestamp but greater sequence",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-1", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 1}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "1000-5",
 			expectError: false,
-			expectID:    "1000-5",
+			expectID:    &EntryID{T: 1000, S: 5},
 		},
 		{
 			name: "explicit timestamp-sequence with same timestamp, auto-increment sequence",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-5", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 5}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "1000-3",
@@ -124,7 +124,7 @@ func TestStream_GenerateOrValidateEntryID(t *testing.T) {
 			name: "explicit timestamp-sequence with smaller timestamp, auto-correct",
 			stream: &Stream{
 				Entries: []StreamEntry{
-					{ID: "1000-5", Fields: map[string]string{"key": "value"}},
+					{ID: EntryID{T: 1000, S: 5}, Fields: map[string]string{"key": "value"}},
 				},
 			},
 			entryID:     "500-10",
@@ -147,14 +147,14 @@ func TestStream_GenerateOrValidateEntryID(t *testing.T) {
 			}
 
 			if !tt.expectError {
-				if tt.expectID != "" && result != tt.expectID {
-					t.Errorf("expected ID %s, got %s", tt.expectID, result)
+				if tt.expectID != nil && (result.T != tt.expectID.T || result.S != tt.expectID.S) {
+					t.Errorf("expected ID {T: %d, S: %d}, got {T: %d, S: %d}", tt.expectID.T, tt.expectID.S, result.T, result.S)
 				}
 
 				// For auto-generated IDs (*), just verify the format
 				if tt.entryID == "*" {
 					// TODO: Add validation for auto-generated timestamp format
-					if result == "" {
+					if result == nil {
 						t.Errorf("expected non-empty result for auto-generated ID")
 					}
 				}
