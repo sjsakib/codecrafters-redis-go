@@ -82,6 +82,12 @@ func (s *Stream) GetRange(startID, endID EntryID) []StreamEntry {
 }
 
 func parseRangeID(idStr string, isStart bool) (EntryID, error) {
+	if idStr == "-" {
+		return EntryID{T: 0, S: 0}, nil
+	}
+	if idStr == "+" {
+		return EntryID{T: int64(^uint64(0) >> 1), S: int64(^uint64(0) >> 1)}, nil
+	}
 	parts := strings.Split(idStr, "-")
 	var id EntryID
 
