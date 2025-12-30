@@ -299,7 +299,13 @@ func (e *engine) handleXAdd(command []string) []byte {
 		ID:     command[2],
 		Fields: make(map[string]string),
 	}
-	
+
+	validatedID, err := stream.GenerateOrValidateEntryID(entry.ID)
+	if err != nil {
+		return encodeErrorMessage(err.Error())
+	}
+	entry.ID = validatedID
+
 	for i := 3; i < len(command); i += 2 {
 		if i+1 >= len(command) {
 			return encodeErrorMessage("XADD requires field-value pairs")
@@ -312,4 +318,3 @@ func (e *engine) handleXAdd(command []string) []byte {
 
 	return encodeResp(entry.ID)
 }
-
