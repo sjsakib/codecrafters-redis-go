@@ -43,6 +43,10 @@ func (s *Stream) GenerateOrValidateEntryID(entryID string) (string, error) {
 		} else if newTimeStamp == lastTimeStamp {
 			newSequence = lastSequence + 1
 		}
+
+		if newTimeStamp == 0 && newSequence == 0 {
+			newSequence = 1
+		}
 	} else {
 		fmt.Sscanf(entryID, "%d-%d", &newTimeStamp, &newSequence)
 
@@ -55,10 +59,6 @@ func (s *Stream) GenerateOrValidateEntryID(entryID string) (string, error) {
 		} else if newTimeStamp == lastTimeStamp && newSequence <= lastSequence {
 			return "", errors.New("The ID specified in XADD is equal or smaller than the target stream top item")
 		}
-	}
-
-	if newTimeStamp == 0 && newSequence == 0 {
-		return "", errors.New("The ID specified in XADD must be greater than 0-0")
 	}
 
 	return fmt.Sprintf("%d-%d", newTimeStamp, newSequence), nil
