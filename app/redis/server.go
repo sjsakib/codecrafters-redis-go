@@ -8,6 +8,7 @@ import (
 
 type RawReq struct {
 	input     []byte
+	command   []string
 	res       chan *RawResp
 	timeStamp time.Time
 }
@@ -32,11 +33,11 @@ func NewServer(engine Engine) Server {
 }
 
 func (m *goroutineMux) Start(address string) error {
-	requestChan := make(chan RawReq, 100)
+	requestChan := make(chan *RawReq, 100)
 
 	go func() {
 		for req := range requestChan {
-			resp := m.engine.Handle(&req)
+			resp := m.engine.Handle(req)
 
 			req.res <- resp
 
@@ -59,7 +60,7 @@ func (m *goroutineMux) Start(address string) error {
 	}
 }
 
-func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan RawReq) {
+func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq) {
 	defer conn.Close()
 	buffer := make([]byte, 1024) // if the command exceeds 1024 bytes, it will be truncated for now
 
@@ -76,13 +77,15 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan RawReq) 
 
 		timeStamp := time.Now()
 
+		resChan := make(chan *RawResp)
+		req := RawReq{
+			input:     buffer[:n],
+			res:       resChan,
+			timeStamp: timeStamp,
+		}
+
 		for {
-			resChan := make(chan *RawResp)
-			requestChan <- RawReq{
-				input:     buffer[:n],
-				res:       resChan,
-				timeStamp: timeStamp,
-			}
+			requestChan <- &req
 
 			response := <-resChan
 			if response.RetryWait == nil {
@@ -91,7 +94,6 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan RawReq) 
 			}
 
 			time.Sleep(*response.RetryWait)
-
 		}
 	}
 }

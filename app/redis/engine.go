@@ -350,11 +350,16 @@ func (e *engine) handleXRange(command []string) []byte {
 
 func (e *engine) handleXRead(req *RawReq) *RawResp {
 	resp := RawResp{}
-	command, err := parseCommand(req.input)
-	if err != nil {
-		resp.Data = encodeErrorMessage(fmt.Sprintf("Failed to parse command: %s", err))
-		return &resp
+	if req.command == nil {
+		command, err := parseCommand(req.input)
+		if err != nil {
+			resp.Data = encodeErrorMessage(fmt.Sprintf("Failed to parse command: %s", err))
+			return &resp
+		}
+		req.command = command
 	}
+
+	command := req.command
 
 	keys := make([]string, 0)
 	ids := make([]EntryID, 0)
@@ -403,6 +408,16 @@ func (e *engine) handleXRead(req *RawReq) *RawResp {
 	for ; i < len(command); i++ {
 		idStr := command[i]
 		entryID := EntryID{}
+		if idStr == "$" {
+			id, err := e.storage.GetStreamTopID(command[i-keyCount])
+			if err != nil {
+				resp.Data = encodeError(err)
+				return &resp
+			}
+			command[i] = fmt.Sprintf("%d-%d", id.T, id.S)
+			ids = append(ids, *id)
+			continue
+		}
 		_, err := fmt.Sscanf(idStr, "%d-%d", &entryID.T, &entryID.S)
 		if err != nil {
 			resp.Data = encodeError(err)

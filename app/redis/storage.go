@@ -17,6 +17,7 @@ type Storage interface {
 	GetOrMakeList(key string) ([]any, error)
 	GetStream(key string) (*Stream, error)
 	GetOrMakeStream(key string) (*Stream, error)
+	GetStreamTopID(key string) (*EntryID, error)
 	Expire(key string, duration time.Duration) bool
 }
 
@@ -91,7 +92,20 @@ func (s *inMemoryStorage) GetOrMakeStream(key string) (*Stream, error) {
 	return stream, nil
 }
 
-
+func (s *inMemoryStorage) GetStreamTopID(key string) (*EntryID, error) {
+	stream, err := s.GetStream(key)
+	if err != nil {
+		if err == ErrKeyNotFound {
+			return &EntryID{S: 0, T: 0}, nil
+		}
+		return nil, err
+	}
+	if len(stream.Entries) == 0 {
+		return &EntryID{S: 0, T: 0}, nil
+	}
+	topEntry := stream.Entries[len(stream.Entries)-1]
+	return &topEntry.ID, nil
+}
 
 func (s *inMemoryStorage) Set(key string, value any) {
 	s.data[key] = value
