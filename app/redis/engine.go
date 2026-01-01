@@ -353,20 +353,32 @@ func (e *engine) handleXRead(command []string) []byte {
 		return encodeInvalidArgCount(command[0])
 	}
 
-	streamKey := command[2]
-
-	stream, err := e.storage.GetStream(streamKey)
-	if err != nil {
-		return encodeError(err)
+	keys := make([]string, 0)
+	ids := make([]EntryID, 0)
+	
+	for i := 2; i < len(command)/2+2; i++ {
+		keys = append(keys, command[i])
+	}
+	for i := len(command)/2 + 2; i < len(command); i++ {
+		idStr := command[i]
+		entryID := EntryID{}
+		_, err := fmt.Sscanf(idStr, "%d-%d", &entryID.T, &entryID.S)
+		if err != nil {
+			return encodeError(err)
+		}
+		ids = append(ids, entryID)
 	}
 
-	idStr := command[3]
-	entryID := EntryID{}
-	_, err = fmt.Sscanf(idStr, "%d-%d", &entryID.T, &entryID.S)
-	if err != nil {
-		return encodeError(err)
-	}
-	entries := stream.GetRange(entryID, nil)
-	return encodeResp([]any{[]any{streamKey,entries}})
+	result := make([]any, 0)
 
+	for idx, streamKey := range keys {
+		stream, err := e.storage.GetStream(streamKey)
+		if err != nil {
+			return encodeError(err)
+		}
+		entries := stream.GetRange(ids[idx], nil)
+		result = append(result, []any{streamKey, entries})
+	}
+	
+	return encodeResp(result)
 }
