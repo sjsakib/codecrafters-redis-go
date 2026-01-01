@@ -71,6 +71,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleXRange(command)
 	case "XREAD":
 		return e.handleXRead(req)
+	case "INCR":
+		resp.Data = e.handleIncr(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -453,4 +455,31 @@ func (e *engine) handleXRead(req *RawReq) *RawResp {
 	}
 
 	return &resp
+}
+
+func (e *engine) handleIncr(command []string) []byte {
+	if len(command) < 2 {
+		return encodeInvalidArgCount(command[0])
+	}
+	
+	value, exists := e.storage.Get(command[1])
+	if !exists {
+		e.storage.Set(command[1], "1")
+		return encodeResp(1)
+	}
+
+	strValue, ok := value.(string)
+	if !ok {
+		return encodeErrorMessage("value is not an integer or out of range")
+	}
+
+	var intValue int
+	_, err := fmt.Sscanf(strValue, "%d", &intValue)
+	if err != nil {
+		return encodeErrorMessage("value is not an integer or out of range")
+	}
+
+	intValue += 1
+	e.storage.Set(command[1], fmt.Sprintf("%d", intValue))
+	return encodeResp(intValue)
 }
