@@ -15,6 +15,7 @@ type Storage interface {
 	Set(key string, value any)
 	GetList(key string) ([]any, error)
 	GetOrMakeList(key string) ([]any, error)
+	GetStream(key string) (*Stream, error)
 	GetOrMakeStream(key string) (*Stream, error)
 	Expire(key string, duration time.Duration) bool
 }
@@ -64,6 +65,18 @@ func (s *inMemoryStorage) GetOrMakeList(key string) ([]any, error) {
 		return nil, ErrWrongType
 	}
 	return list, nil
+}
+
+func (s *inMemoryStorage) GetStream(key string) (*Stream, error) {
+	value, exists := s.data[key]
+	if !exists {
+		return nil, ErrKeyNotFound
+	}
+	stream, ok := value.(*Stream)
+	if !ok {
+		return nil, ErrWrongType
+	}
+	return stream, nil
 }
 
 func (s *inMemoryStorage) GetOrMakeStream(key string) (*Stream, error) {

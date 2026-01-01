@@ -2,6 +2,7 @@ package redis
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -68,6 +69,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleXAdd(command)
 	case "XRANGE":
 		resp.Data = e.handleXRange(command)
+	case "XREAD":
+		resp.Data = e.handleXRead(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -340,7 +343,30 @@ func (e *engine) handleXRange(command []string) []byte {
 		return encodeError(err)
 	}
 
-	entries := stream.GetRange(startID, endID)
+	entries := stream.GetRange(startID, &endID)
 
 	return encodeResp(entries)
+}
+
+func (e *engine) handleXRead(command []string) []byte {
+	if len(command) < 4 || strings.ToUpper(command[1]) != "STREAMS" {
+		return encodeInvalidArgCount(command[0])
+	}
+
+	streamKey := command[2]
+
+	stream, err := e.storage.GetStream(streamKey)
+	if err != nil {
+		return encodeError(err)
+	}
+
+	idStr := command[3]
+	entryID := EntryID{}
+	_, err = fmt.Sscanf(idStr, "%d-%d", &entryID.T, &entryID.S)
+	if err != nil {
+		return encodeError(err)
+	}
+	entries := stream.GetRange(entryID, nil)
+	return encodeResp([]any{[]any{streamKey,entries}})
+
 }

@@ -70,11 +70,11 @@ func (s *Stream) GenerateOrValidateEntryID(entryID string) (*EntryID, error) {
 	return &EntryID{T: newTimeStamp, S: newSequence}, nil
 }
 
-func (s *Stream) GetRange(startID, endID EntryID) []StreamEntry {
+func (s *Stream) GetRange(startID EntryID, endID *EntryID) []StreamEntry {
 	var result []StreamEntry
 	for _, entry := range s.Entries {
-		if (entry.ID.T > startID.T || (entry.ID.T == startID.T && entry.ID.S >= startID.S)) &&
-			(entry.ID.T < endID.T || (entry.ID.T == endID.T && entry.ID.S <= endID.S)) {
+		if (entry.ID.T > startID.T || (entry.ID.T == startID.T && entry.ID.S >= startID.S)) && (endID == nil ||
+			(entry.ID.T < endID.T || (entry.ID.T == endID.T && entry.ID.S <= endID.S))) {
 			result = append(result, entry)
 		}
 	}
