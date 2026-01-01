@@ -70,7 +70,7 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 	case "XRANGE":
 		resp.Data = e.handleXRange(command)
 	case "XREAD":
-		resp.Data = e.handleXRead(command)
+		return e.handleXRead(req)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -348,37 +348,94 @@ func (e *engine) handleXRange(command []string) []byte {
 	return encodeResp(entries)
 }
 
-func (e *engine) handleXRead(command []string) []byte {
-	if len(command) < 4 || strings.ToUpper(command[1]) != "STREAMS" {
-		return encodeInvalidArgCount(command[0])
+func (e *engine) handleXRead(req *RawReq) *RawResp {
+	resp := RawResp{}
+	command, err := parseCommand(req.input)
+	if err != nil {
+		resp.Data = encodeErrorMessage(fmt.Sprintf("Failed to parse command: %s", err))
+		return &resp
 	}
 
 	keys := make([]string, 0)
 	ids := make([]EntryID, 0)
 
-	for i := 2; i < len(command)/2+1; i++ {
+	i := 1
+
+	isBlocking := false
+	if strings.ToUpper(command[i]) == "BLOCK" {
+		if len(command) < 6 {
+			resp.Data = encodeInvalidArgCount(command[0])
+			return &resp
+		}
+		isBlocking = true
+		var timeoutMs int
+		_, err := fmt.Sscanf(command[i+1], "%d", &timeoutMs)
+		if err != nil {
+			resp.Data = encodeErrorMessage("BLOCK time must be an integer")
+			return &resp
+		}
+		if timeoutMs < 0 {
+			resp.Data = encodeErrorMessage("BLOCK time must be non-negative")
+			return &resp
+		}
+		timeoutTime := req.timeStamp.Add(time.Duration(timeoutMs) * time.Millisecond)
+		if timeoutMs != 0 && timeoutTime.Before(time.Now()) {
+			resp.Data = encodeNullArray()
+			return &resp
+		}
+
+		i += 2
+	}
+
+	if strings.ToUpper(command[i]) != "STREAMS" {
+		resp.Data = encodeInvalidArgCount(command[0])
+
+		return &resp
+	}
+
+	i++
+
+	keyCount := (len(command) - i) / 2
+
+	for ; i < len(command)-keyCount; i++ {
 		keys = append(keys, command[i])
 	}
-	for i := len(command)/2 + 1; i < len(command); i++ {
+	for ; i < len(command); i++ {
 		idStr := command[i]
 		entryID := EntryID{}
 		_, err := fmt.Sscanf(idStr, "%d-%d", &entryID.T, &entryID.S)
 		if err != nil {
-			return encodeError(err)
+			resp.Data = encodeError(err)
+			return &resp
 		}
 		ids = append(ids, entryID)
 	}
 
 	result := make([]any, 0)
 
+	hasData := false
 	for idx, streamKey := range keys {
 		stream, err := e.storage.GetStream(streamKey)
 		if err != nil {
-			return encodeError(err)
+			if err == ErrKeyNotFound {
+				continue
+			}
+			resp.Data = encodeError(err)
+			return &resp
 		}
-		entries := stream.GetRange(ids[idx], nil)
+		entries := stream.GetAfterID(ids[idx])
+		if len(entries) > 0 {
+			hasData = true
+		}
 		result = append(result, []any{streamKey, entries})
 	}
 
-	return encodeResp(result)
+	if hasData {
+		resp.Data = encodeResp(result)
+	} else if isBlocking {
+		wait := (time.Duration(100) * time.Millisecond)
+		resp.RetryWait = &wait
+	}
+
+	return &resp
 }
