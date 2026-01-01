@@ -355,11 +355,11 @@ func (e *engine) handleXRead(command []string) []byte {
 
 	keys := make([]string, 0)
 	ids := make([]EntryID, 0)
-	
-	for i := 2; i < len(command)/2+2; i++ {
+
+	for i := 2; i < len(command)/2+1; i++ {
 		keys = append(keys, command[i])
 	}
-	for i := len(command)/2 + 2; i < len(command); i++ {
+	for i := len(command)/2 + 1; i < len(command); i++ {
 		idStr := command[i]
 		entryID := EntryID{}
 		_, err := fmt.Sscanf(idStr, "%d-%d", &entryID.T, &entryID.S)
@@ -379,6 +379,6 @@ func (e *engine) handleXRead(command []string) []byte {
 		entries := stream.GetRange(ids[idx], nil)
 		result = append(result, []any{streamKey, entries})
 	}
-	
+
 	return encodeResp(result)
 }
