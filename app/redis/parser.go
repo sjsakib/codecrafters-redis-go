@@ -65,6 +65,8 @@ func encodeResp(val any) []byte {
 		return encodeArray(v)
 	case []StreamEntry:
 		return encodeArray(v)
+	case []byte:
+		return v
 	case StreamEntry:
 		var buffer bytes.Buffer
 		fmt.Fprintf(&buffer, "*2\r\n")

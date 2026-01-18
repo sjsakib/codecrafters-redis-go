@@ -65,6 +65,8 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq)
 	defer conn.Close()
 	buffer := make([]byte, 1024) // if the command exceeds 1024 bytes, it will be truncated for now
 
+	connId := randomID()
+	
 	for {
 		n, err := conn.Read(buffer)
 		if err != nil {
@@ -83,6 +85,7 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq)
 			input:     buffer[:n],
 			res:       resChan,
 			timeStamp: timeStamp,
+			connId: connId,
 		}
 
 		for {

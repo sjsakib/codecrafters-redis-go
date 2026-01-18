@@ -11,26 +11,37 @@ type Engine interface {
 }
 
 type engine struct {
-	storage Storage
-	commandQueues map[string]chan *RawReq
+	storage          Storage
+	commandQueues    map[string][]*RawReq
+	isExecutingMulti bool
 }
 
 func NewEngine(storage Storage) Engine {
 	return &engine{
-		storage: storage,
-		commandQueues: make(map[string]chan *RawReq),
+		storage:       storage,
+		commandQueues: make(map[string][]*RawReq),
 	}
 }
 
 func (e *engine) Handle(req *RawReq) *RawResp {
-	command, err := parseCommand(req.input)
-
 	resp := RawResp{}
 
-	if err != nil {
-		resp.Data = encodeErrorMessage(fmt.Sprintf("Failed to parse command: %s", err))
+	if req.command == nil {
+		command, err := parseCommand(req.input)
+		if err != nil {
+			resp.Data = encodeErrorMessage(fmt.Sprintf("Failed to parse command: %s", err))
+			return &resp
+		}
+
+		req.command = command
+	}
+
+	if e.queueIfMulti(req) {
+		resp.Data = encodeSimpleString("QUEUED")
 		return &resp
 	}
+
+	command := req.command
 
 	switch command[0] {
 	case "PING":
@@ -77,6 +88,10 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleIncr(command)
 	case "MULTI":
 		return e.handleMulti(req)
+	case "EXEC":
+		return e.handleExec(req.connId)
+	case "DISCARD":
+		return e.handleDiscard(req.connId)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -465,7 +480,7 @@ func (e *engine) handleIncr(command []string) []byte {
 	if len(command) < 2 {
 		return encodeInvalidArgCount(command[0])
 	}
-	
+
 	value, exists := e.storage.Get(command[1])
 	if !exists {
 		e.storage.Set(command[1], "1")
@@ -489,5 +504,53 @@ func (e *engine) handleIncr(command []string) []byte {
 }
 
 func (e *engine) handleMulti(req *RawReq) *RawResp {
+	_, exists := e.commandQueues[req.connId]
+	if !exists {
+		e.commandQueues[req.connId] = make([]*RawReq, 0)
+	} else {
+		return &RawResp{Data: encodeErrorMessage("MULTI calls cannot be nested")}
+	}
+	return &RawResp{Data: encodeSimpleString("OK")}
+}
+
+func (e *engine) queueIfMulti(req *RawReq) bool {
+	if req.command[0] == "EXEC" || req.command[0] == "MULTI" || e.isExecutingMulti {
+		return false
+	}
+	queue, exists := e.commandQueues[req.connId]
+	if exists {
+		e.commandQueues[req.connId] = append(queue, req)
+	}
+	return exists
+}
+
+func (e *engine) handleExec(connId string) *RawResp {
+	_, exists := e.commandQueues[connId]
+	if !exists {
+		return &RawResp{Data: encodeErrorMessage("EXEC without MULTI")}
+	}
+
+	responses := make([][]byte, 0)
+
+	e.isExecutingMulti = true
+	defer func() { e.isExecutingMulti = false }()
+
+	for _, queuedReq := range e.commandQueues[connId] {
+		resp := e.Handle(queuedReq)
+		responses = append(responses, resp.Data)
+	}
+
+	delete(e.commandQueues, connId)
+
+	return &RawResp{Data: encodeArray(responses)}
+}
+
+func (e *engine) handleDiscard(connId string) *RawResp {
+	_, exists := e.commandQueues[connId]
+	if !exists {
+		return &RawResp{Data: encodeErrorMessage("DISCARD without MULTI")}
+	}
+	
+	delete(e.commandQueues, connId)
 	return &RawResp{Data: encodeSimpleString("OK")}
 }
