@@ -514,7 +514,7 @@ func (e *engine) handleMulti(req *RawReq) *RawResp {
 }
 
 func (e *engine) queueIfMulti(req *RawReq) bool {
-	if req.command[0] == "EXEC" || req.command[0] == "MULTI" || e.isExecutingMulti {
+	if req.command[0] == "EXEC" || req.command[0] == "MULTI" || req.command[0] == "DISCARD" || e.isExecutingMulti {
 		return false
 	}
 	queue, exists := e.commandQueues[req.connId]
@@ -550,7 +550,7 @@ func (e *engine) handleDiscard(connId string) *RawResp {
 	if !exists {
 		return &RawResp{Data: encodeErrorMessage("DISCARD without MULTI")}
 	}
-	
+
 	delete(e.commandQueues, connId)
 	return &RawResp{Data: encodeSimpleString("OK")}
 }
