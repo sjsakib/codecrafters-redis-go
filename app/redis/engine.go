@@ -283,7 +283,7 @@ func (e *engine) handleBLPop(req *RawReq) *RawResp {
 		return &resp
 	}
 
-	wait := (time.Duration(100) * time.Millisecond)
+	wait := (time.Duration(50) * time.Millisecond)
 	resp.RetryWait = &wait
 
 	return &resp
