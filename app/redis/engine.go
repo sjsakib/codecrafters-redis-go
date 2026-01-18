@@ -12,11 +12,13 @@ type Engine interface {
 
 type engine struct {
 	storage Storage
+	commandQueues map[string]chan *RawReq
 }
 
 func NewEngine(storage Storage) Engine {
 	return &engine{
 		storage: storage,
+		commandQueues: make(map[string]chan *RawReq),
 	}
 }
 
@@ -73,6 +75,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		return e.handleXRead(req)
 	case "INCR":
 		resp.Data = e.handleIncr(command)
+	case "MULTI":
+		return e.handleMulti(req)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -482,4 +486,8 @@ func (e *engine) handleIncr(command []string) []byte {
 	intValue += 1
 	e.storage.Set(command[1], fmt.Sprintf("%d", intValue))
 	return encodeResp(intValue)
+}
+
+func (e *engine) handleMulti(req *RawReq) *RawResp {
+	return &RawResp{Data: encodeSimpleString("OK")}
 }

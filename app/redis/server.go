@@ -11,6 +11,7 @@ type RawReq struct {
 	command   []string
 	res       chan *RawResp
 	timeStamp time.Time
+	connId    string
 }
 
 type RawResp struct {
