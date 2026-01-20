@@ -92,11 +92,19 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		return e.handleExec(req.connId)
 	case "DISCARD":
 		return e.handleDiscard(req.connId)
+	case "INFO":
+		resp.Data = e.handleInfo(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
 
 	return &resp
+}
+
+func (e *engine) handleInfo(command []string) []byte {
+	info := "role:master\r\n"
+
+	return encodeResp(info)
 }
 
 func (e *engine) handleSetCommand(command []string) []byte {
