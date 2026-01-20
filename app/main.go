@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -12,7 +13,11 @@ func main() {
 	engine := redis.NewEngine(storage)
 	server := redis.NewServer(engine)
 
-	if err := server.Start(":6379"); err != nil {
+	port := flag.Int("port", 6379, "Port to run the Redis server on")
+	flag.Parse()
+
+
+	if err := server.Start(fmt.Sprintf(":%d", *port)); err != nil {
 		fmt.Println("Failed to start server:", err)
 		os.Exit(1)
 	}

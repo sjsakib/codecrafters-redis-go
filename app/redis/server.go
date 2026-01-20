@@ -45,7 +45,7 @@ func (m *goroutineMux) Start(address string) error {
 		}
 	}()
 
-	l, err := net.Listen("tcp", ":6379")
+	l, err := net.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("failed to listen on port 6379: %s", err)
 	}
