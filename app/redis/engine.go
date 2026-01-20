@@ -14,12 +14,14 @@ type engine struct {
 	storage          Storage
 	commandQueues    map[string][]*RawReq
 	isExecutingMulti bool
+	masterAddress    string
 }
 
-func NewEngine(storage Storage) Engine {
+func NewEngine(storage Storage, masterAddress string) Engine {
 	return &engine{
 		storage:       storage,
 		commandQueues: make(map[string][]*RawReq),
+		masterAddress: masterAddress,
 	}
 }
 
@@ -102,7 +104,11 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 }
 
 func (e *engine) handleInfo(command []string) []byte {
-	info := "role:master\r\n"
+	role := "master"
+	if e.masterAddress != "" {
+		role = "slave"
+	}
+	info := fmt.Sprintf("role:%s\r\n", role)
 
 	return encodeResp(info)
 }
