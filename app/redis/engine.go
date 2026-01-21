@@ -2,12 +2,14 @@ package redis
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
 
 type Engine interface {
 	Handle(req *RawReq) *RawResp
+	PingMasterIfSlave() error
 }
 
 type ReplicationInfo struct {
@@ -111,6 +113,26 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 	}
 
 	return &resp
+}
+
+func (e *engine) PingMasterIfSlave() error {
+	if e.replicationInfo.MasterAddress == "" {
+		return nil
+	}
+
+	conn, err := net.Dial("tcp", e.replicationInfo.MasterAddress)
+
+	if err != nil {
+		return fmt.Errorf("failed to open tcp connection to master: %w", err)
+	}
+	defer conn.Close()
+	
+	_, err = conn.Write(encodeResp([]any{"PING"}))
+	if err != nil {
+		return fmt.Errorf("failed to send PING command to master: %w", err)
+	}
+
+	return nil
 }
 
 func (e *engine) handleInfo(command []string) []byte {
