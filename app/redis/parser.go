@@ -46,6 +46,14 @@ func parse(reader *bytes.Reader) ([]string, error) {
 		var command string
 		fmt.Fscanf(reader, "%s\r\n", &command)
 		return []string{command}, nil
+	case '+':
+		var command string
+		fmt.Fscanf(reader, "%s\r\n", &command)
+		return []string{command}, nil
+	case '-':
+		var command string
+		fmt.Fscanf(reader, "%s\r\n", &command)
+		return []string{command}, nil
 	default:
 		if err != nil {
 			return nil, err
@@ -61,6 +69,8 @@ func encodeResp(val any) []byte {
 		return encodeBulkString(v)
 	case int:
 		return fmt.Appendf(nil, ":%d\r\n", v)
+	case []string:
+		return encodeArray(v)
 	case [](any):
 		return encodeArray(v)
 	case []StreamEntry:

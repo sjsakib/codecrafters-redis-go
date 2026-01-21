@@ -2,7 +2,6 @@ package redis
 
 import (
 	"fmt"
-	"net"
 	"strings"
 	"time"
 )
@@ -108,6 +107,9 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		return e.handleDiscard(req.connId)
 	case "INFO":
 		resp.Data = e.handleInfo(command)
+	case "REPLCONF", "PSYNC":
+		// For simplicity, we just acknowledge these commands without actual replication logic
+		resp.Data = encodeSimpleString("OK")
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -120,41 +122,27 @@ func (e *engine) PingMasterIfSlave() error {
 		return nil
 	}
 
-	conn, err := net.Dial("tcp", e.replicationInfo.MasterAddress)
+	client := NewClient(e.replicationInfo.MasterAddress)
 
+	_, err := client.Send([]string{"PING"})
 	if err != nil {
-		return fmt.Errorf("failed to open tcp connection to master: %w", err)
+		return fmt.Errorf("failed to ping master: %w", err)
 	}
-	defer conn.Close()
 	
-	_, err = conn.Write(encodeResp([]any{"PING"}))
-	if err != nil {
-		return fmt.Errorf("failed to send PING command to master: %w", err)
-	}
+	_, err = client.Send([]string{"REPLCONF", "listening-port", "6380"})
 
-	_, err = conn.Read(make([]byte, 1024))
-	if err != nil {
-		return fmt.Errorf("failed to read PONG response from master: %w", err)
-	}
-
-	_, err = conn.Write(encodeResp([]any{"REPLCONF", "listening-port", "6380"}))
 	if err != nil {
 		return fmt.Errorf("failed to send REPLCONF command to master: %w", err)
 	}
 
-	_, err = conn.Read(make([]byte, 1024))
+	_, err = client.Send([]string{"REPLCONF", "capa", "psync2"})
 	if err != nil {
-		return fmt.Errorf("failed to read REPLCONF response from master: %w", err)
+		return fmt.Errorf("failed to send REPLCONF command to master: %w", err)
 	}
 
-	_, err = conn.Write(encodeResp([]any{"REPLCONF", "capa", "psync2"}))
+	_, err = client.Send([]string{"PSYNC", "?", "-1"})
 	if err != nil {
 		return fmt.Errorf("failed to send PSYNC command to master: %w", err)
-	}
-
-	_, err = conn.Read(make([]byte, 1024))
-	if err != nil {
-		return fmt.Errorf("failed to read PSYNC response from master: %w", err)
 	}
 	return nil
 }
