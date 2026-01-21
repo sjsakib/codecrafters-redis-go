@@ -132,6 +132,30 @@ func (e *engine) PingMasterIfSlave() error {
 		return fmt.Errorf("failed to send PING command to master: %w", err)
 	}
 
+	_, err = conn.Read(make([]byte, 1024))
+	if err != nil {
+		return fmt.Errorf("failed to read PONG response from master: %w", err)
+	}
+
+	_, err = conn.Write(encodeResp([]any{"REPLCONF", "listening-port", "6380"}))
+	if err != nil {
+		return fmt.Errorf("failed to send REPLCONF command to master: %w", err)
+	}
+
+	_, err = conn.Read(make([]byte, 1024))
+	if err != nil {
+		return fmt.Errorf("failed to read REPLCONF response from master: %w", err)
+	}
+
+	_, err = conn.Write(encodeResp([]any{"REPLCONF", "capa", "psync2"}))
+	if err != nil {
+		return fmt.Errorf("failed to send PSYNC command to master: %w", err)
+	}
+
+	_, err = conn.Read(make([]byte, 1024))
+	if err != nil {
+		return fmt.Errorf("failed to read PSYNC response from master: %w", err)
+	}
 	return nil
 }
 
