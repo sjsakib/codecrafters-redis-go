@@ -10,18 +10,28 @@ type Engine interface {
 	Handle(req *RawReq) *RawResp
 }
 
+type ReplicationInfo struct {
+	MasterAddress string
+	ReplicationId  string
+	Offset         int64
+}
+
 type engine struct {
 	storage          Storage
 	commandQueues    map[string][]*RawReq
 	isExecutingMulti bool
-	masterAddress    string
+	replicationInfo ReplicationInfo
 }
 
 func NewEngine(storage Storage, masterAddress string) Engine {
 	return &engine{
 		storage:       storage,
 		commandQueues: make(map[string][]*RawReq),
-		masterAddress: masterAddress,
+		replicationInfo: ReplicationInfo{
+			MasterAddress: masterAddress,
+			ReplicationId: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
+			Offset: 0,
+		},
 	}
 }
 
@@ -105,10 +115,12 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 
 func (e *engine) handleInfo(command []string) []byte {
 	role := "master"
-	if e.masterAddress != "" {
+	if e.replicationInfo.MasterAddress != "" {
 		role = "slave"
 	}
 	info := fmt.Sprintf("role:%s\r\n", role)
+	info += fmt.Sprintf("master_replid:%s\r\n", e.replicationInfo.ReplicationId)
+	info += fmt.Sprintf("master_repl_offset:%d\r\n", e.replicationInfo.Offset)
 
 	return encodeResp(info)
 }
