@@ -107,9 +107,12 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		return e.handleDiscard(req.connId)
 	case "INFO":
 		resp.Data = e.handleInfo(command)
-	case "REPLCONF", "PSYNC":
+	case "REPLCONF":
 		// For simplicity, we just acknowledge these commands without actual replication logic
 		resp.Data = encodeSimpleString("OK")
+	case "PSYNC":
+		// For simplicity, we just acknowledge these commands without actual replication logic
+		resp.Data = encodeSimpleString("FULLRESYNC " + e.replicationInfo.ReplicationId + " 0")
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
