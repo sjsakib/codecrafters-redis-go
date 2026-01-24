@@ -6,10 +6,38 @@ import (
 	"time"
 )
 
+type Command string
+
+const (
+	CmdPing     Command = "PING"
+	CmdSet      Command = "SET"
+	CmdGet      Command = "GET"
+	CmdRPush    Command = "RPUSH"
+	CmdLPush    Command = "LPUSH"
+	CmdLRange   Command = "LRANGE"
+	CmdLLen     Command = "LLEN"
+	CmdLPop     Command = "LPOP"
+	CmdBLPop    Command = "BLPOP"
+	CmdType     Command = "TYPE"
+	CmdXAdd     Command = "XADD"
+	CmdXRange   Command = "XRANGE"
+	CmdXRead    Command = "XREAD"
+	CmdIncr     Command = "INCR"
+	CmdMulti    Command = "MULTI"
+	CmdExec     Command = "EXEC"
+	CmdDiscard  Command = "DISCARD"
+	CmdInfo     Command = "INFO"
+	CmdDel      Command = "DEL"
+	CmdPsync    Command = "PSYNC"
+	CmdReplConf Command = "REPLCONF"
+	CmdEcho     Command = "ECHO"
+)
+
 type Engine interface {
 	Handle(req *RawReq) *RawResp
-	StartLoop(reqCh chan *RawReq)
-	PingMasterIfSlave() error
+	StartLoop()
+	ReqCh() chan *RawReq
+	StartReplicationIfSlave() error
 }
 
 type ReplicationInfo struct {
@@ -24,16 +52,19 @@ type TimeOut struct {
 
 type engine struct {
 	storage          Storage
+	reqCh            chan *RawReq
 	commandQueues    map[string][]*RawReq
 	isExecutingMulti bool
 	replicationInfo  ReplicationInfo
 	blockedReqs      []*RawReq
 	timeoutCh        chan *TimeOut
+	slaveReqs        []*RawReq
 }
 
 func NewEngine(storage Storage, masterAddress string) Engine {
 	return &engine{
 		storage:       storage,
+		reqCh:         make(chan *RawReq, 100),
 		commandQueues: make(map[string][]*RawReq),
 		replicationInfo: ReplicationInfo{
 			MasterAddress: masterAddress,
@@ -42,16 +73,18 @@ func NewEngine(storage Storage, masterAddress string) Engine {
 		},
 		blockedReqs: make([]*RawReq, 0),
 		timeoutCh:   make(chan *TimeOut, 100),
+		slaveReqs:   make([]*RawReq, 0),
 	}
 }
 
-func (e *engine) StartLoop(reqCh chan *RawReq) {
+func (e *engine) StartLoop() {
+	e.StartReplicationIfSlave()
 	go func() {
 		for {
 			select {
 			case to := <-e.timeoutCh:
 				e.handleTimeout(to)
-			case req, ok := <-reqCh:
+			case req, ok := <-e.reqCh:
 				if !ok {
 					return
 				}
@@ -59,6 +92,10 @@ func (e *engine) StartLoop(reqCh chan *RawReq) {
 			}
 		}
 	}()
+}
+
+func (e *engine) ReqCh() chan *RawReq {
+	return e.reqCh
 }
 
 func (e *engine) Handle(req *RawReq) *RawResp {
@@ -83,17 +120,19 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 
 	command := req.command
 
-	switch command[0] {
-	case "PING":
+	shouldClose := true
+
+	switch Command(command[0]) {
+	case CmdPing:
 		resp.Data = encodeSimpleString("PONG")
-	case "ECHO":
+	case CmdEcho:
 		if len(command) < 2 {
 			resp.Data = encodeErrorMessage("wrong number of arguments for 'ECHO' command")
 		}
 		resp.Data = encodeBulkString(command[1])
-	case "SET":
+	case CmdSet:
 		resp.Data = e.handleSetCommand(command)
-	case "GET":
+	case CmdGet:
 		if len(command) < 2 {
 			resp.Data = encodeInvalidArgCount("GET")
 			break
@@ -104,55 +143,66 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 			break
 		}
 		resp.Data = encodeResp(value)
-	case "RPUSH":
+	case CmdRPush:
 		resp.Data = e.handleRPushCommand(command)
-		defer e.handleBlockedCommands("BLPOP")
-	case "LPUSH":
+		defer e.handleBlockedCommands(CmdBLPop)
+	case CmdLPush:
 		resp.Data = e.handleLPushCommand(command)
-		defer e.handleBlockedCommands("BLPOP")
-	case "LRANGE":
+		defer e.handleBlockedCommands(CmdBLPop)
+	case CmdLRange:
 		resp.Data = e.handleLRangeCommand(command)
-	case "LLEN":
+	case CmdLLen:
 		resp.Data = e.handleLLen(command)
-	case "LPOP":
+	case CmdLPop:
 		resp.Data = e.handleLPopCommand(command)
-	case "BLPOP":
+	case CmdBLPop:
 		resp.Data = e.handleBLPop(req)
-	case "TYPE":
+	case CmdType:
 		resp.Data = e.handleType(command)
-	case "XADD":
+	case CmdXAdd:
 		resp.Data = e.handleXAdd(command)
-		defer e.handleBlockedCommands("XREAD")
-	case "XRANGE":
+		defer e.handleBlockedCommands(CmdXRead)
+	case CmdXRange:
 		resp.Data = e.handleXRange(command)
-	case "XREAD":
+	case CmdXRead:
 		resp.Data = e.handleXRead(req)
-	case "INCR":
+	case CmdIncr:
 		resp.Data = e.handleIncr(command)
-	case "MULTI":
+	case CmdMulti:
 		resp.Data = e.handleMulti(req)
-	case "EXEC":
+	case CmdExec:
 		resp.Data = e.handleExec(req)
-	case "DISCARD":
+	case CmdDiscard:
 		resp.Data = e.handleDiscard(req.connId)
-	case "INFO":
+	case CmdInfo:
 		resp.Data = e.handleInfo(command)
-	case "REPLCONF":
+	case CmdReplConf:
 		// For simplicity, we just acknowledge these commands without actual replication logic
 		resp.Data = encodeSimpleString("OK")
-	case "PSYNC":
+	case CmdPsync:
 		// For simplicity, we just acknowledge these commands without actual replication logic
 		resp.Data = encodeSimpleString("FULLRESYNC " + e.replicationInfo.ReplicationId + " 0")
 
 		resp.Data = append(resp.Data, []byte("$88\r\n")...)
 		resp.Data = append(resp.Data, []byte{0x52, 0x45, 0x44, 0x49, 0x53, 0x30, 0x30, 0x31, 0x31, 0xfa, 0x09, 0x72, 0x65, 0x64, 0x69, 0x73, 0x2d, 0x76, 0x65, 0x72, 0x05, 0x37, 0x2e, 0x32, 0x2e, 0x30, 0xfa, 0x0a, 0x72, 0x65, 0x64, 0x69, 0x73, 0x2d, 0x62, 0x69, 0x74, 0x73, 0xc0, 0x40, 0xfa, 0x05, 0x63, 0x74, 0x69, 0x6d, 0x65, 0xc2, 0x6d, 0x08, 0xbc, 0x65, 0xfa, 0x08, 0x75, 0x73, 0x65, 0x64, 0x2d, 0x6d, 0x65, 0x6d, 0xc2, 0xb0, 0xc4, 0x10, 0x00, 0xfa, 0x08, 0x61, 0x6f, 0x66, 0x2d, 0x62, 0x61, 0x73, 0x65, 0xc0, 0x00, 0xff, 0xf0, 0x6e, 0x3b, 0xfe, 0xc0, 0xff, 0x5a, 0xa2}...)
+		e.slaveReqs = append(e.slaveReqs, req)
+		shouldClose = false
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
 
 	if !e.isExecutingMulti && resp.Data != nil {
 		req.resCh <- &resp
-		close(req.resCh)
+		if shouldClose {
+			close(req.resCh)
+		}
+	}
+
+	if isWriteCommand(command[0]) && e.IsMaster() {
+		e.replicationInfo.Offset += int64(len(req.input) + len(resp.Data))
+		for _, slaveReq := range e.slaveReqs {
+			slaveReq.resCh <- &RawResp{Data: encodeResp(command)}
+		}
 	}
 
 	return &resp
@@ -194,11 +244,11 @@ func (e *engine) handleTimeout(to *TimeOut) {
 	}
 }
 
-func (e *engine) handleBlockedCommands(command string) {
+func (e *engine) handleBlockedCommands(command Command) {
 	newBlockedReqs := make([]*RawReq, 0)
 	gotSuccess := false
 	for _, req := range e.blockedReqs {
-		if req.command[0] != command {
+		if req.command[0] != string(command) {
 			newBlockedReqs = append(newBlockedReqs, req)
 			continue
 		}
@@ -217,7 +267,11 @@ func (e *engine) handleBlockedCommands(command string) {
 	e.blockedReqs = newBlockedReqs
 }
 
-func (e *engine) PingMasterIfSlave() error {
+func (e *engine) IsMaster() bool {
+	return e.replicationInfo.MasterAddress == ""
+}
+
+func (e *engine) StartReplicationIfSlave() error {
 	if e.replicationInfo.MasterAddress == "" {
 		return nil
 	}
@@ -244,6 +298,27 @@ func (e *engine) PingMasterIfSlave() error {
 	if err != nil {
 		return fmt.Errorf("failed to send PSYNC command to master: %w", err)
 	}
+	go func() {
+		for {
+			req, err := client.ReceiveCommand()
+			if err != nil {
+				if strings.Contains(err.Error(), "EOF") {
+					fmt.Println("REPL: connection closed by master, retrying in 5 seconds...")
+					time.AfterFunc(5*time.Second, func() {
+						e.StartReplicationIfSlave()
+					})
+				}
+				return
+			}
+			e.reqCh <- req
+
+			go func () {
+				for range req.resCh {
+					// drain response channel
+				}
+			}()
+		}
+	}()
 	return nil
 }
 

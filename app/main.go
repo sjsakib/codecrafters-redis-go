@@ -30,12 +30,6 @@ func main() {
 	engine := redis.NewEngine(storage, masterAddress)
 	server := redis.NewServer(engine)
 
-	err := engine.PingMasterIfSlave()
-	if err != nil {
-		fmt.Println("Failed to ping master:", err)
-		os.Exit(1)
-	}
-
 	if err := server.Start(fmt.Sprintf(":%d", *port)); err != nil {
 		fmt.Println("Failed to start server:", err)
 		os.Exit(1)

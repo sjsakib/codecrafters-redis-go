@@ -35,9 +35,8 @@ func NewServer(engine Engine) Server {
 }
 
 func (m *goroutineMux) Start(address string) error {
-	requestChan := make(chan *RawReq, 100)
 
-	m.engine.StartLoop(requestChan)
+	m.engine.StartLoop()
 
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -51,7 +50,7 @@ func (m *goroutineMux) Start(address string) error {
 			return fmt.Errorf("failed to accept connection: %s", err)
 		}
 
-		go m.handleConnection(conn, requestChan)
+		go m.handleConnection(conn, m.engine.ReqCh())
 	}
 }
 

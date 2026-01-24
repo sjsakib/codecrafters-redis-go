@@ -8,6 +8,7 @@ import (
 
 type Client interface {
 	Send(command []string) (any, error)
+	ReceiveCommand() (*RawReq, error)
 }
 
 type tcpClient struct {
@@ -48,4 +49,22 @@ func (c *tcpClient) Send(command []string) (any, error) {
 	}
 
 	return data, nil
+}
+
+func (c *tcpClient) ReceiveCommand() (*RawReq, error) {
+	var buffer [1024]byte
+	n, err := c.conn.Read(buffer[:])
+
+	if err != nil {
+		if err.Error() == "EOF" {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to read from connection: %w", err)
+	}
+
+	return &RawReq{
+		input: buffer[:n],
+		resCh: make(chan *RawResp),
+	}, nil
+
 }
