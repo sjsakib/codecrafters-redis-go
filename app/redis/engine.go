@@ -300,7 +300,7 @@ func (e *engine) StartReplicationIfSlave() error {
 	}
 	go func() {
 		for {
-			req, err := client.ReceiveCommand()
+			input, err := client.Read()
 			if err != nil {
 				if strings.Contains(err.Error(), "EOF") {
 					fmt.Println("REPL: connection closed by master, retrying in 5 seconds...")
@@ -310,13 +310,24 @@ func (e *engine) StartReplicationIfSlave() error {
 				}
 				return
 			}
-			e.reqCh <- req
 
-			go func () {
-				for range req.resCh {
-					// drain response channel
+			commands, err := parseCommands(input)
+			if err != nil {
+				fmt.Println("REPL: failed to parse command from master:", err)
+				break
+			}
+			for _, command := range commands {
+				req := &RawReq{
+					command: command,
+					resCh:   make(chan *RawResp),
 				}
-			}()
+				e.reqCh <- req
+				go func() {
+					for range req.resCh {
+						// drain response channel
+					}
+				}()
+			}
 		}
 	}()
 	return nil
@@ -478,13 +489,13 @@ func (e *engine) handleLPopCommand(command []string) []byte {
 }
 
 func (e *engine) handleBLPop(req *RawReq) []byte {
-	command, err := parseCommand(req.input)
+	command := req.command
 	if len(command) < 3 {
 		return encodeInvalidArgCount(command[0])
 	}
 
 	var timeoutSec float32
-	_, err = fmt.Sscanf(command[2], "%f", &timeoutSec)
+	_, err := fmt.Sscanf(command[2], "%f", &timeoutSec)
 	if err != nil {
 		return encodeErrorMessage("timeout must be an integer")
 	}

@@ -8,6 +8,23 @@ import (
 
 const intFmtStr = "%d\r\n"
 
+func parseCommands(input []byte) ([][]string, error) {
+	commands := make([][]string, 0)
+	reader := bytes.NewReader(input)
+	for {
+		command, err := parse(reader)
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			return nil, err
+		}
+		command[0] = strings.ToUpper(command[0])
+		commands = append(commands, command)
+	}
+	return commands, nil
+}
+
 func parseCommand(input []byte) ([]string, error) {
 	command, err := parse(bytes.NewReader(input))
 	if err != nil {
