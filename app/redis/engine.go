@@ -8,6 +8,7 @@ import (
 
 type Engine interface {
 	Handle(req *RawReq) *RawResp
+	StartLoop(reqCh chan *RawReq)
 	PingMasterIfSlave() error
 }
 
@@ -17,11 +18,17 @@ type ReplicationInfo struct {
 	Offset        int64
 }
 
+type TimeOut struct {
+	Req *RawReq
+}
+
 type engine struct {
 	storage          Storage
 	commandQueues    map[string][]*RawReq
 	isExecutingMulti bool
 	replicationInfo  ReplicationInfo
+	blockedReqs      []*RawReq
+	timeoutCh        chan *TimeOut
 }
 
 func NewEngine(storage Storage, masterAddress string) Engine {
@@ -33,7 +40,25 @@ func NewEngine(storage Storage, masterAddress string) Engine {
 			ReplicationId: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
 			Offset:        0,
 		},
+		blockedReqs: make([]*RawReq, 0),
+		timeoutCh:   make(chan *TimeOut, 100),
 	}
+}
+
+func (e *engine) StartLoop(reqCh chan *RawReq) {
+	go func() {
+		for {
+			select {
+			case to := <-e.timeoutCh:
+				e.handleTimeout(to)
+			case req, ok := <-reqCh:
+				if !ok {
+					return
+				}
+				e.Handle(req)
+			}
+		}
+	}()
 }
 
 func (e *engine) Handle(req *RawReq) *RawResp {
@@ -51,6 +76,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 
 	if e.queueIfMulti(req) {
 		resp.Data = encodeSimpleString("QUEUED")
+		req.resCh <- &resp
+		close(req.resCh)
 		return &resp
 	}
 
@@ -79,32 +106,35 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = encodeResp(value)
 	case "RPUSH":
 		resp.Data = e.handleRPushCommand(command)
-	case "LRANGE":
-		resp.Data = e.handleLRangeCommand(command)
+		defer e.handleBlockedCommands("BLPOP")
 	case "LPUSH":
 		resp.Data = e.handleLPushCommand(command)
+		defer e.handleBlockedCommands("BLPOP")
+	case "LRANGE":
+		resp.Data = e.handleLRangeCommand(command)
 	case "LLEN":
 		resp.Data = e.handleLLen(command)
 	case "LPOP":
 		resp.Data = e.handleLPopCommand(command)
 	case "BLPOP":
-		return e.handleBLPop(req)
+		resp.Data = e.handleBLPop(req)
 	case "TYPE":
 		resp.Data = e.handleType(command)
 	case "XADD":
 		resp.Data = e.handleXAdd(command)
+		defer e.handleBlockedCommands("XREAD")
 	case "XRANGE":
 		resp.Data = e.handleXRange(command)
 	case "XREAD":
-		return e.handleXRead(req)
+		resp.Data = e.handleXRead(req)
 	case "INCR":
 		resp.Data = e.handleIncr(command)
 	case "MULTI":
-		return e.handleMulti(req)
+		resp.Data = e.handleMulti(req)
 	case "EXEC":
-		return e.handleExec(req.connId)
+		resp.Data = e.handleExec(req)
 	case "DISCARD":
-		return e.handleDiscard(req.connId)
+		resp.Data = e.handleDiscard(req.connId)
 	case "INFO":
 		resp.Data = e.handleInfo(command)
 	case "REPLCONF":
@@ -120,7 +150,71 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
 
+	if !e.isExecutingMulti && resp.Data != nil {
+		req.resCh <- &resp
+		close(req.resCh)
+	}
+
 	return &resp
+}
+
+func (e *engine) timeoutReq(req *RawReq, duration time.Duration) {
+	if req.isTimeoutScheduled {
+		return
+	}
+	if duration == 0 {
+		return
+	}
+	req.isTimeoutScheduled = true
+	to := &TimeOut{
+		Req: req,
+	}
+	time.AfterFunc(duration, func() {
+		e.timeoutCh <- to
+	})
+}
+
+func (e *engine) handleTimeout(to *TimeOut) {
+	for _, req := range e.blockedReqs {
+		if req == to.Req {
+			resp := RawResp{}
+			resp.Data = encodeNullArray()
+			req.resCh <- &resp
+			close(req.resCh)
+
+			newBlocked := make([]*RawReq, 0)
+			for _, r := range e.blockedReqs {
+				if r != req {
+					newBlocked = append(newBlocked, r)
+				}
+			}
+			e.blockedReqs = newBlocked
+			break
+		}
+	}
+}
+
+func (e *engine) handleBlockedCommands(command string) {
+	newBlockedReqs := make([]*RawReq, 0)
+	gotSuccess := false
+	for _, req := range e.blockedReqs {
+		if req.command[0] != command {
+			newBlockedReqs = append(newBlockedReqs, req)
+			continue
+		}
+		var res *RawResp
+		if !gotSuccess {
+			res = e.Handle(req)
+			if res != nil {
+				gotSuccess = true
+			}
+		}
+		if res == nil {
+			newBlockedReqs = append(newBlockedReqs, req)
+		}
+
+	}
+	e.blockedReqs = newBlockedReqs
 }
 
 func (e *engine) PingMasterIfSlave() error {
@@ -308,51 +402,47 @@ func (e *engine) handleLPopCommand(command []string) []byte {
 	return []byte(encodeResp(poppedValues))
 }
 
-func (e *engine) handleBLPop(req *RawReq) *RawResp {
+func (e *engine) handleBLPop(req *RawReq) []byte {
 	command, err := parseCommand(req.input)
-	resp := RawResp{}
 	if len(command) < 3 {
-		resp.Data = encodeInvalidArgCount(command[0])
-		return &resp
+		return encodeInvalidArgCount(command[0])
 	}
 
 	var timeoutSec float32
 	_, err = fmt.Sscanf(command[2], "%f", &timeoutSec)
 	if err != nil {
-		resp.Data = encodeErrorMessage("timeout must be an integer")
-		return &resp
+		return encodeErrorMessage("timeout must be an integer")
 	}
 	if timeoutSec < 0 {
-		resp.Data = encodeErrorMessage("timeout must be non-negative")
-		return &resp
+		return encodeErrorMessage("timeout must be non-negative")
 	}
 
-	timeoutTime := req.timeStamp.Add(time.Duration(timeoutSec*1000) * time.Millisecond)
+	timeoutDuration := time.Duration(timeoutSec*1000) * time.Millisecond
+
+	e.timeoutReq(req, timeoutDuration)
+
+	timeoutTime := req.timeStamp.Add(timeoutDuration)
 
 	if timeoutSec != 0 && timeoutTime.Before(time.Now()) {
-		resp.Data = encodeNullArray()
-		return &resp
+		return encodeNullArray()
 	}
 
 	list, err := e.storage.GetOrMakeList(command[1])
 
 	if err != nil {
-		resp.Data = encodeError(err)
-		return &resp
+		return encodeError(err)
 	}
 
 	if len(list) > 0 {
 		poppedValue := list[0]
 		list = list[1:]
 		e.storage.Set(command[1], list)
-		resp.Data = encodeResp([]any{command[1], poppedValue})
-		return &resp
+		return encodeResp([]any{command[1], poppedValue})
 	}
 
-	wait := (time.Duration(50) * time.Millisecond)
-	resp.RetryWait = &wait
+	e.blockedReqs = append(e.blockedReqs, req)
 
-	return &resp
+	return nil
 }
 
 func (e *engine) handleType(command []string) []byte {
@@ -435,17 +525,7 @@ func (e *engine) handleXRange(command []string) []byte {
 	return encodeResp(entries)
 }
 
-func (e *engine) handleXRead(req *RawReq) *RawResp {
-	resp := RawResp{}
-	if req.command == nil {
-		command, err := parseCommand(req.input)
-		if err != nil {
-			resp.Data = encodeErrorMessage(fmt.Sprintf("Failed to parse command: %s", err))
-			return &resp
-		}
-		req.command = command
-	}
-
+func (e *engine) handleXRead(req *RawReq) []byte {
 	command := req.command
 
 	keys := make([]string, 0)
@@ -456,33 +536,31 @@ func (e *engine) handleXRead(req *RawReq) *RawResp {
 	isBlocking := false
 	if strings.ToUpper(command[i]) == "BLOCK" {
 		if len(command) < 6 {
-			resp.Data = encodeInvalidArgCount(command[0])
-			return &resp
+			return encodeInvalidArgCount(command[0])
 		}
 		isBlocking = true
 		var timeoutMs int
 		_, err := fmt.Sscanf(command[i+1], "%d", &timeoutMs)
 		if err != nil {
-			resp.Data = encodeErrorMessage("BLOCK time must be an integer")
-			return &resp
+			return encodeErrorMessage("BLOCK time must be an integer")
 		}
 		if timeoutMs < 0 {
-			resp.Data = encodeErrorMessage("BLOCK time must be non-negative")
-			return &resp
+			return encodeErrorMessage("BLOCK time must be non-negative")
 		}
-		timeoutTime := req.timeStamp.Add(time.Duration(timeoutMs) * time.Millisecond)
+		timeoutDuration := time.Duration(timeoutMs) * time.Millisecond
+		timeoutTime := req.timeStamp.Add(timeoutDuration)
+
+		e.timeoutReq(req, timeoutDuration)
+
 		if timeoutMs != 0 && timeoutTime.Before(time.Now()) {
-			resp.Data = encodeNullArray()
-			return &resp
+			return encodeNullArray()
 		}
 
 		i += 2
 	}
 
 	if strings.ToUpper(command[i]) != "STREAMS" {
-		resp.Data = encodeInvalidArgCount(command[0])
-
-		return &resp
+		return encodeInvalidArgCount(command[0])
 	}
 
 	i++
@@ -498,8 +576,7 @@ func (e *engine) handleXRead(req *RawReq) *RawResp {
 		if idStr == "$" {
 			id, err := e.storage.GetStreamTopID(command[i-keyCount])
 			if err != nil {
-				resp.Data = encodeError(err)
-				return &resp
+				return encodeError(err)
 			}
 			command[i] = fmt.Sprintf("%d-%d", id.T, id.S)
 			ids = append(ids, *id)
@@ -507,8 +584,7 @@ func (e *engine) handleXRead(req *RawReq) *RawResp {
 		}
 		_, err := fmt.Sscanf(idStr, "%d-%d", &entryID.T, &entryID.S)
 		if err != nil {
-			resp.Data = encodeError(err)
-			return &resp
+			return encodeError(err)
 		}
 		ids = append(ids, entryID)
 	}
@@ -522,8 +598,7 @@ func (e *engine) handleXRead(req *RawReq) *RawResp {
 			if err == ErrKeyNotFound {
 				continue
 			}
-			resp.Data = encodeError(err)
-			return &resp
+			return encodeError(err)
 		}
 		entries := stream.GetAfterID(ids[idx])
 		if len(entries) > 0 {
@@ -533,13 +608,14 @@ func (e *engine) handleXRead(req *RawReq) *RawResp {
 	}
 
 	if hasData {
-		resp.Data = encodeResp(result)
-	} else if isBlocking {
-		wait := (time.Duration(100) * time.Millisecond)
-		resp.RetryWait = &wait
+		return encodeResp(result)
 	}
+	if isBlocking {
+		e.blockedReqs = append(e.blockedReqs, req)
+		return nil
+	}
+	return encodeNullArray()
 
-	return &resp
 }
 
 func (e *engine) handleIncr(command []string) []byte {
@@ -569,14 +645,14 @@ func (e *engine) handleIncr(command []string) []byte {
 	return encodeResp(intValue)
 }
 
-func (e *engine) handleMulti(req *RawReq) *RawResp {
+func (e *engine) handleMulti(req *RawReq) []byte {
 	_, exists := e.commandQueues[req.connId]
 	if !exists {
 		e.commandQueues[req.connId] = make([]*RawReq, 0)
-	} else {
-		return &RawResp{Data: encodeErrorMessage("MULTI calls cannot be nested")}
+		return encodeSimpleString("OK")
 	}
-	return &RawResp{Data: encodeSimpleString("OK")}
+	return encodeErrorMessage("MULTI calls cannot be nested")
+
 }
 
 func (e *engine) queueIfMulti(req *RawReq) bool {
@@ -590,10 +666,10 @@ func (e *engine) queueIfMulti(req *RawReq) bool {
 	return exists
 }
 
-func (e *engine) handleExec(connId string) *RawResp {
-	_, exists := e.commandQueues[connId]
+func (e *engine) handleExec(req *RawReq) []byte {
+	_, exists := e.commandQueues[req.connId]
 	if !exists {
-		return &RawResp{Data: encodeErrorMessage("EXEC without MULTI")}
+		return encodeErrorMessage("EXEC without MULTI")
 	}
 
 	responses := make([][]byte, 0)
@@ -601,22 +677,22 @@ func (e *engine) handleExec(connId string) *RawResp {
 	e.isExecutingMulti = true
 	defer func() { e.isExecutingMulti = false }()
 
-	for _, queuedReq := range e.commandQueues[connId] {
+	for _, queuedReq := range e.commandQueues[req.connId] {
 		resp := e.Handle(queuedReq)
 		responses = append(responses, resp.Data)
 	}
 
-	delete(e.commandQueues, connId)
+	delete(e.commandQueues, req.connId)
 
-	return &RawResp{Data: encodeArray(responses)}
+	return encodeArray(responses)
 }
 
-func (e *engine) handleDiscard(connId string) *RawResp {
+func (e *engine) handleDiscard(connId string) []byte {
 	_, exists := e.commandQueues[connId]
 	if !exists {
-		return &RawResp{Data: encodeErrorMessage("DISCARD without MULTI")}
+		return encodeErrorMessage("DISCARD without MULTI")
 	}
 
 	delete(e.commandQueues, connId)
-	return &RawResp{Data: encodeSimpleString("OK")}
+	return encodeSimpleString("OK")
 }

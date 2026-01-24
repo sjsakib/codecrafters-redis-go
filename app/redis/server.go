@@ -7,11 +7,12 @@ import (
 )
 
 type RawReq struct {
-	input     []byte
-	command   []string
-	res       chan *RawResp
-	timeStamp time.Time
-	connId    string
+	input              []byte
+	command            []string
+	resCh              chan *RawResp
+	timeStamp          time.Time
+	connId             string
+	isTimeoutScheduled bool
 }
 
 type RawResp struct {
@@ -36,14 +37,7 @@ func NewServer(engine Engine) Server {
 func (m *goroutineMux) Start(address string) error {
 	requestChan := make(chan *RawReq, 100)
 
-	go func() {
-		for req := range requestChan {
-			resp := m.engine.Handle(req)
-
-			req.res <- resp
-
-		}
-	}()
+	m.engine.StartLoop(requestChan)
 
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -66,7 +60,7 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq)
 	buffer := make([]byte, 1024) // if the command exceeds 1024 bytes, it will be truncated for now
 
 	connId := randomID()
-	
+
 	for {
 		n, err := conn.Read(buffer)
 		if err != nil {
@@ -83,21 +77,19 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq)
 		resChan := make(chan *RawResp)
 		req := RawReq{
 			input:     buffer[:n],
-			res:       resChan,
+			resCh:     resChan,
 			timeStamp: timeStamp,
-			connId: connId,
+			connId:    connId,
 		}
 
-		for {
-			requestChan <- &req
+		requestChan <- &req
 
-			response := <-resChan
-			if response.RetryWait == nil {
-				conn.Write(response.Data)
+		for {
+			response, ok := <-resChan
+			if !ok {
 				break
 			}
-
-			time.Sleep(*response.RetryWait)
+			conn.Write(response.Data)
 		}
 	}
 }
