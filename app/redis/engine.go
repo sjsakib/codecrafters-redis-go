@@ -278,23 +278,23 @@ func (e *engine) StartReplicationIfSlave() error {
 
 	client := NewClient(e.replicationInfo.MasterAddress)
 
-	_, err := client.Send([]string{"PING"})
+	_, err := client.Do([]string{"PING"})
 	if err != nil {
 		return fmt.Errorf("failed to ping master: %w", err)
 	}
 
-	_, err = client.Send([]string{"REPLCONF", "listening-port", "6380"})
+	_, err = client.Do([]string{"REPLCONF", "listening-port", "6380"})
 
 	if err != nil {
 		return fmt.Errorf("failed to send REPLCONF command to master: %w", err)
 	}
 
-	_, err = client.Send([]string{"REPLCONF", "capa", "psync2"})
+	_, err = client.Do([]string{"REPLCONF", "capa", "psync2"})
 	if err != nil {
 		return fmt.Errorf("failed to send REPLCONF command to master: %w", err)
 	}
 
-	_, err = client.Send([]string{"PSYNC", "?", "-1"})
+	_, err = client.Do([]string{"PSYNC", "?", "-1"})
 	if err != nil {
 		return fmt.Errorf("failed to send PSYNC command to master: %w", err)
 	}
@@ -320,6 +320,14 @@ func (e *engine) StartReplicationIfSlave() error {
 				req := &RawReq{
 					command: command,
 					resCh:   make(chan *RawResp),
+				}
+				if len(req.command) >= 2 && req.command[0] == string(CmdReplConf) && req.command[1] == "GETACK" {
+					err := client.Send([]string{string(CmdReplConf), "ACK", fmt.Sprintf("%d", e.replicationInfo.Offset)})
+
+					if err != nil {
+						fmt.Println("REPL: failed to send REPLCONF ACK to master:", err)
+					}
+					break
 				}
 				e.reqCh <- req
 				go func() {
