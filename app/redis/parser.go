@@ -3,14 +3,21 @@ package redis
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 )
 
 const intFmtStr = "%d\r\n"
 
-func parseCommands(input []byte) ([][]string, error) {
-	commands := make([][]string, 0)
+type CmdWithLen struct {
+	Command []string
+	Length  int
+}
+
+func parseCommands(input []byte) ([]CmdWithLen, error) {
+	commands := make([]CmdWithLen, 0)
 	reader := bytes.NewReader(input)
+	lastOffset := int64(0)
 	for {
 		command, err := parse(reader)
 		if err != nil {
@@ -19,8 +26,10 @@ func parseCommands(input []byte) ([][]string, error) {
 			}
 			return nil, err
 		}
+		offset := int64(reader.Size()) - int64(reader.Len())
 		command[0] = strings.ToUpper(command[0])
-		commands = append(commands, command)
+		commands = append(commands, CmdWithLen{Command: command, Length: int(offset - lastOffset)})
+		lastOffset = offset
 	}
 	return commands, nil
 }
@@ -62,11 +71,20 @@ func parse(reader *bytes.Reader) ([]string, error) {
 		fmt.Fscanf(reader, intFmtStr, &length)
 		var command string
 		fmt.Fscanf(reader, "%s\r\n", &command)
+		if length != len(command) {
+			// forward the reader to skip the remaining bytes
+			remaining := length - len(command)
+			if remaining > 0 {
+				reader.Seek(int64(remaining), io.SeekCurrent)
+			}
+		}
 		return []string{command}, nil
 	case '+':
-		var command string
-		fmt.Fscanf(reader, "%s\r\n", &command)
-		return []string{command}, nil
+		line, err := readLine(reader)
+		if err != nil {
+			return nil, err
+		}
+		return []string{line}, nil
 	case '-':
 		var command string
 		fmt.Fscanf(reader, "%s\r\n", &command)
@@ -78,6 +96,28 @@ func parse(reader *bytes.Reader) ([]string, error) {
 		return nil, fmt.Errorf("unexpected byte: %c", b)
 	}
 
+}
+
+func readLine(r *bytes.Reader) (string, error) {
+    var sb strings.Builder
+    for {
+        b, err := r.ReadByte()
+        if err != nil {
+            return "", err
+        }
+        if b == '\r' {
+            b2, err := r.ReadByte()
+            if err != nil {
+                return "", err
+            }
+            if b2 != '\n' {
+                return "", fmt.Errorf("expected LF after CR")
+            }
+            break
+        }
+        sb.WriteByte(b)
+    }
+    return sb.String(), nil
 }
 
 func encodeResp(val any) []byte {

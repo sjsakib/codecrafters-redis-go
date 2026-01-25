@@ -199,9 +199,10 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 	}
 
 	if isWriteCommand(command[0]) && e.IsMaster() {
-		e.replicationInfo.Offset += int64(len(req.input) + len(resp.Data))
+		cmdBytes := encodeResp(command)
+		e.replicationInfo.Offset += int64(len(cmdBytes))
 		for _, slaveReq := range e.slaveReqs {
-			slaveReq.resCh <- &RawResp{Data: encodeResp(command)}
+			slaveReq.resCh <- &RawResp{Data: cmdBytes}
 		}
 	}
 
@@ -294,7 +295,7 @@ func (e *engine) StartReplicationIfSlave() error {
 		return fmt.Errorf("failed to send REPLCONF command to master: %w", err)
 	}
 
-	_, err = client.Do([]string{"PSYNC", "?", "-1"})
+	err = client.Send([]string{"PSYNC", "?", "-1"})
 	if err != nil {
 		return fmt.Errorf("failed to send PSYNC command to master: %w", err)
 	}
@@ -317,8 +318,11 @@ func (e *engine) StartReplicationIfSlave() error {
 				break
 			}
 			for _, command := range commands {
+				if command.Command[0] == "REDIS0011�" || strings.HasPrefix(command.Command[0], "FULLRESYN") {
+					continue
+				}
 				req := &RawReq{
-					command: command,
+					command: command.Command,
 					resCh:   make(chan *RawResp),
 				}
 				if len(req.command) >= 2 && req.command[0] == string(CmdReplConf) && req.command[1] == "GETACK" {
@@ -327,15 +331,17 @@ func (e *engine) StartReplicationIfSlave() error {
 					if err != nil {
 						fmt.Println("REPL: failed to send REPLCONF ACK to master:", err)
 					}
-					break
+				} else {
+					e.reqCh <- req
+					go func() {
+						for range req.resCh {
+							// drain response channel
+						}
+					}()
 				}
-				e.reqCh <- req
-				go func() {
-					for range req.resCh {
-						// drain response channel
-					}
-				}()
+				e.replicationInfo.Offset += int64(command.Length)
 			}
+
 		}
 	}()
 	return nil
