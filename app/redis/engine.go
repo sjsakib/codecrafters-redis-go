@@ -31,7 +31,7 @@ const (
 	CmdPsync    Command = "PSYNC"
 	CmdReplConf Command = "REPLCONF"
 	CmdEcho     Command = "ECHO"
-	CmdWait	 Command = "WAIT"
+	CmdWait     Command = "WAIT"
 )
 
 type Engine interface {
@@ -51,6 +51,13 @@ type TimeOut struct {
 	Req *RawReq
 }
 
+type WaitReq struct {
+	Req          *RawReq
+	NumReplicas  int
+	OffsetTarget int64
+	AckedCount   int
+}
+
 type engine struct {
 	storage          Storage
 	reqCh            chan *RawReq
@@ -60,6 +67,7 @@ type engine struct {
 	blockedReqs      []*RawReq
 	timeoutCh        chan *TimeOut
 	slaveReqs        []*RawReq
+	ackMap           map[string]*WaitReq
 }
 
 func NewEngine(storage Storage, masterAddress string) Engine {
@@ -75,11 +83,15 @@ func NewEngine(storage Storage, masterAddress string) Engine {
 		blockedReqs: make([]*RawReq, 0),
 		timeoutCh:   make(chan *TimeOut, 100),
 		slaveReqs:   make([]*RawReq, 0),
+		ackMap:      make(map[string]*WaitReq),
 	}
 }
 
 func (e *engine) StartLoop() {
-	e.StartReplicationIfSlave()
+	err := e.StartReplicationIfSlave()
+	if err != nil {
+		fmt.Println(fmt.Errorf("Failed to start replication: %w\n", err))
+	}
 	go func() {
 		for {
 			select {
@@ -179,7 +191,7 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleInfo(command)
 	case CmdReplConf:
 		// For simplicity, we just acknowledge these commands without actual replication logic
-		resp.Data = encodeSimpleString("OK")
+		return e.handleReplConf(req)
 	case CmdPsync:
 		// For simplicity, we just acknowledge these commands without actual replication logic
 		resp.Data = encodeSimpleString("FULLRESYNC " + e.replicationInfo.ReplicationId + " 0")
@@ -189,7 +201,7 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		e.slaveReqs = append(e.slaveReqs, req)
 		shouldClose = false
 	case CmdWait:
-		resp.Data = e.handleWait(command)
+		resp.Data = e.handleWait(req)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -229,6 +241,7 @@ func (e *engine) timeoutReq(req *RawReq, duration time.Duration) {
 }
 
 func (e *engine) handleTimeout(to *TimeOut) {
+	fmt.Println("handling timeout")
 	for _, req := range e.blockedReqs {
 		if req == to.Req {
 			resp := RawResp{}
@@ -243,6 +256,17 @@ func (e *engine) handleTimeout(to *TimeOut) {
 				}
 			}
 			e.blockedReqs = newBlocked
+			break
+		}
+	}
+
+	for _, req := range e.ackMap {
+		if req.Req == to.Req {
+			resp := RawResp{}
+			resp.Data = encodeResp(req.AckedCount)
+			req.Req.resCh <- &resp
+			close(req.Req.resCh)
+			delete(e.ackMap, to.Req.connId)
 			break
 		}
 	}
@@ -350,11 +374,98 @@ func (e *engine) StartReplicationIfSlave() error {
 	return nil
 }
 
-func (e *engine) handleWait(command []string) []byte {
-	if len(command) < 3 {
-		return encodeInvalidArgCount("WAIT")
+func (e *engine) handleReplConf(req *RawReq) *RawResp {
+	resp := RawResp{}
+	defer func() {
+		if resp.Data != nil {
+			req.resCh <- &resp
+			close(req.resCh)
+		}
+	}()
+	if len(req.command) < 3 {
+		resp.Data = encodeInvalidArgCount("REPLCONF")
+		return &resp
 	}
-	return encodeResp(0)
+
+
+	if strings.ToUpper(req.command[1]) == "ACK" {
+		ackOffset := int64(0)
+		_, err := fmt.Sscanf(req.command[2], "%d", &ackOffset)
+		if err != nil {
+			resp.Data = encodeErrorMessage("ACK offset must be an integer")
+			return &resp
+		}
+
+		shouldKeepSlaveReq := len(e.ackMap) > 0
+
+		for connId, waitReq := range e.ackMap {
+			if ackOffset >= waitReq.OffsetTarget {
+				waitReq.AckedCount++
+				if waitReq.AckedCount >= waitReq.NumReplicas {
+					waitReq.Req.resCh <- &RawResp{
+						Data: encodeResp(waitReq.AckedCount),
+					}
+					close(waitReq.Req.resCh)
+					delete(e.ackMap, connId)
+				}
+			}
+		}
+
+		if shouldKeepSlaveReq {
+			resp.Data = encodeSimpleString("OK")
+			req.resCh <- &resp
+			resp.Data = nil
+			e.slaveReqs = append(e.slaveReqs, req)
+			return &resp
+		}
+
+	}
+	resp.Data = encodeSimpleString("OK")
+	return &resp
+}
+
+func (e *engine) handleWait(req *RawReq) []byte {
+	if len(req.command) < 3 {
+		return encodeInvalidArgCount(string(CmdWait))
+	}
+
+	numReplicas := 0
+	_, err := fmt.Sscanf(req.command[1], "%d", &numReplicas)
+	if err != nil {
+		return encodeErrorMessage("numreplicas must be an integer")
+	}
+
+	if numReplicas == 0 {
+		return encodeResp(0)
+	}
+
+	timeoutMs := 0
+	_, err = fmt.Sscanf(req.command[2], "%d", &timeoutMs)
+	if err != nil {
+		return encodeErrorMessage("timeout must be an integer")
+	}
+
+	if e.replicationInfo.Offset == 0 {
+		return encodeResp(len(e.slaveReqs))
+	}
+
+	for _, slaveReq := range e.slaveReqs {
+		slaveReq.resCh <- &RawResp{Data: encodeResp([]string{"REPLCONF", "GETACK", fmt.Sprintf("%d", e.replicationInfo.Offset)})}
+		close(slaveReq.resCh)
+	}
+	e.slaveReqs = make([]*RawReq, 0)
+
+	if timeoutMs != 0 {
+		e.timeoutReq(req, time.Duration(timeoutMs)*time.Millisecond)
+	}
+	e.ackMap[req.connId] = &WaitReq{
+		Req:          req,
+		NumReplicas:  numReplicas,
+		OffsetTarget: e.replicationInfo.Offset,
+		AckedCount:   0,
+	}
+
+	return nil
 }
 
 func (e *engine) handleInfo(command []string) []byte {
