@@ -241,7 +241,6 @@ func (e *engine) timeoutReq(req *RawReq, duration time.Duration) {
 }
 
 func (e *engine) handleTimeout(to *TimeOut) {
-	fmt.Println("handling timeout")
 	for _, req := range e.blockedReqs {
 		if req == to.Req {
 			resp := RawResp{}
@@ -396,8 +395,6 @@ func (e *engine) handleReplConf(req *RawReq) *RawResp {
 			return &resp
 		}
 
-		shouldKeepSlaveReq := len(e.ackMap) > 0
-
 		for connId, waitReq := range e.ackMap {
 			if ackOffset >= waitReq.OffsetTarget {
 				waitReq.AckedCount++
@@ -411,13 +408,9 @@ func (e *engine) handleReplConf(req *RawReq) *RawResp {
 			}
 		}
 
-		if shouldKeepSlaveReq {
-			resp.Data = encodeSimpleString("OK")
-			req.resCh <- &resp
-			resp.Data = nil
-			e.slaveReqs = append(e.slaveReqs, req)
-			return &resp
-		}
+		resp.Data = nil
+		close(req.resCh)
+		return &resp
 
 	}
 	resp.Data = encodeSimpleString("OK")
@@ -450,10 +443,8 @@ func (e *engine) handleWait(req *RawReq) []byte {
 	}
 
 	for _, slaveReq := range e.slaveReqs {
-		slaveReq.resCh <- &RawResp{Data: encodeResp([]string{"REPLCONF", "GETACK", fmt.Sprintf("%d", e.replicationInfo.Offset)})}
-		close(slaveReq.resCh)
+		slaveReq.resCh <- &RawResp{Data: encodeResp([]string{"REPLCONF", "GETACK", "*"})}
 	}
-	e.slaveReqs = make([]*RawReq, 0)
 
 	if timeoutMs != 0 {
 		e.timeoutReq(req, time.Duration(timeoutMs)*time.Millisecond)

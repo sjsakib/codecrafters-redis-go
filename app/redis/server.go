@@ -83,12 +83,15 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq)
 
 		requestChan <- &req
 
-		for {
-			response, ok := <-resChan
-			if !ok {
-				break
+		go func() {
+			for {
+				response, ok := <-resChan
+				if !ok {
+					break
+				}
+				conn.Write(response.Data)
 			}
-			conn.Write(response.Data)
-		}
+		}()
+
 	}
 }
