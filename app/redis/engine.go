@@ -32,12 +32,14 @@ const (
 	CmdReplConf Command = "REPLCONF"
 	CmdEcho     Command = "ECHO"
 	CmdWait     Command = "WAIT"
+	CmdConfig   Command = "CONFIG"
 )
 
 type Engine interface {
 	Handle(req *RawReq) *RawResp
 	StartLoop()
 	ReqCh() chan *RawReq
+	SetConfig(config Config)
 	StartReplicationIfSlave() error
 }
 
@@ -58,6 +60,11 @@ type WaitReq struct {
 	AckedCount   int
 }
 
+type Config struct {
+	Dir        string
+	DBFilename string
+}
+
 type engine struct {
 	storage          Storage
 	reqCh            chan *RawReq
@@ -68,6 +75,7 @@ type engine struct {
 	timeoutCh        chan *TimeOut
 	slaveReqs        []*RawReq
 	ackMap           map[string]*WaitReq
+	config           Config
 }
 
 func NewEngine(storage Storage, masterAddress string) Engine {
@@ -85,6 +93,10 @@ func NewEngine(storage Storage, masterAddress string) Engine {
 		slaveReqs:   make([]*RawReq, 0),
 		ackMap:      make(map[string]*WaitReq),
 	}
+}
+
+func (e *engine) SetConfig(config Config) {
+	e.config = config
 }
 
 func (e *engine) StartLoop() {
@@ -202,6 +214,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		shouldClose = false
 	case CmdWait:
 		resp.Data = e.handleWait(req)
+	case CmdConfig:
+		resp.Data = e.handleConfig(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -385,7 +399,6 @@ func (e *engine) handleReplConf(req *RawReq) *RawResp {
 		resp.Data = encodeInvalidArgCount("REPLCONF")
 		return &resp
 	}
-
 
 	if strings.ToUpper(req.command[1]) == "ACK" {
 		ackOffset := int64(0)
@@ -907,4 +920,26 @@ func (e *engine) handleDiscard(connId string) []byte {
 
 	delete(e.commandQueues, connId)
 	return encodeSimpleString("OK")
+}
+
+func (e *engine) handleConfig(command []string) []byte {
+	if len(command) < 3 {
+		return encodeInvalidArgCount("CONFIG")
+	}
+
+	subcommand := strings.ToUpper(command[1])
+	switch subcommand {
+	case "GET":
+		pattern := command[2]
+		result := make([]any, 0)
+		if pattern == "*" || pattern == "dir" {
+			result = append(result, "dir", e.config.Dir)
+		}
+		if pattern == "*" || pattern == "dbfilename" {
+			result = append(result, "dbfilename", e.config.DBFilename)
+		}
+		return encodeResp(result)
+	default:
+		return encodeErrorMessage("unknown CONFIG subcommand: " + subcommand)
+	}
 }

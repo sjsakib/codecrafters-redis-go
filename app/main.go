@@ -14,6 +14,9 @@ func main() {
 
 	replicaof := flag.String("replicaof", "", "Address of master")
 
+	dbfilename := flag.String("dbfilename", "dump.rdb", "Filename for RDB persistence")
+	dir := flag.String("dir", "./data", "Directory for RDB persistence")
+
 	flag.Parse()
 
 	masterAddress := ""
@@ -28,6 +31,11 @@ func main() {
 
 	storage := redis.NewInMemoryStorage()
 	engine := redis.NewEngine(storage, masterAddress)
+	engine.SetConfig(redis.Config{
+		DBFilename: *dbfilename,
+		Dir:        *dir,
+	})
+
 	server := redis.NewServer(engine)
 
 	if err := server.Start(fmt.Sprintf(":%d", *port)); err != nil {
