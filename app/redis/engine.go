@@ -1,7 +1,11 @@
 package redis
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -33,6 +37,7 @@ const (
 	CmdEcho     Command = "ECHO"
 	CmdWait     Command = "WAIT"
 	CmdConfig   Command = "CONFIG"
+	CmdKeys     Command = "KEYS"
 )
 
 type Engine interface {
@@ -100,7 +105,13 @@ func (e *engine) SetConfig(config Config) {
 }
 
 func (e *engine) StartLoop() {
-	err := e.StartReplicationIfSlave()
+
+	err := e.LoadRDBFileIfPresent()
+	if err != nil {
+		fmt.Println("Failed to load RDB file:", err)
+	}
+
+	err = e.StartReplicationIfSlave()
 	if err != nil {
 		fmt.Println(fmt.Errorf("Failed to start replication: %w\n", err))
 	}
@@ -216,6 +227,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleWait(req)
 	case CmdConfig:
 		resp.Data = e.handleConfig(command)
+	case CmdKeys:
+		resp.Data = e.handleKeys(command)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -310,6 +323,119 @@ func (e *engine) handleBlockedCommands(command Command) {
 
 func (e *engine) IsMaster() bool {
 	return e.replicationInfo.MasterAddress == ""
+}
+
+func (e *engine) LoadRDBFileIfPresent() error {
+	if e.config.DBFilename == "" || e.config.Dir == "" {
+		return nil
+	}
+
+	dirAbsPath, err := filepath.Abs(e.config.Dir)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path of DB directory: %w", err)
+	}
+
+	fullPath := filepath.Join(dirAbsPath, e.config.DBFilename)
+	file, err := os.Open(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("RDB file does not exist")
+			return nil
+		}
+		return fmt.Errorf("failed to open RDB file: %w", err)
+	}
+	defer file.Close()
+	return e.loadRDB(file)
+
+}
+
+func (e *engine) loadRDB(reader io.Reader) error {
+	r := bufio.NewReader(reader)
+
+	fmt.Println("Reading DB")
+
+	var magic [9]byte
+	_, err := r.Read(magic[:])
+	if err != nil {
+		return fmt.Errorf("failed to read RDB magic: %w", err)
+	}
+
+	fmt.Println("Reading RDB version: ", string(magic[:]))
+
+	for {
+		marker, err := r.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Finished reading RDB file")
+			}
+			return fmt.Errorf("failed to read RDB marker: %w", err)
+		}
+
+		if marker != 0xFA {
+			r.UnreadByte()
+			break
+		}
+		k, v, err := decodeKV(r)
+
+		if err != nil {
+			return fmt.Errorf("failed to decode RDB key-value pair: %w", err)
+		}
+
+		fmt.Printf("%s: %s\n", k, v)
+	}
+
+	for {
+		marker, err := r.ReadByte()
+		if err != nil {
+			return fmt.Errorf("failed to read RDB EOF marker: %w", err)
+		}
+		if marker != 0xFE {
+			r.UnreadByte()
+			break
+		}
+		index, _, err := decodeLength(r)
+		if err != nil {
+			return fmt.Errorf("failed to decode RDB database index: %w", err)
+		}
+		fmt.Printf("\nReading DB with index %d\n", index)
+		for {
+			marker, err := r.ReadByte()
+			if err != nil {
+				return fmt.Errorf("failed to read RDB database EOF marker: %w", err)
+			}
+			if marker == 0xFB {
+				fmt.Println("Reading hashtable")
+				dataLen, _, err := decodeLength(r)
+				if err != nil {
+					return fmt.Errorf("failed to decode RDB hashtable length: %w", err)
+				}
+				expiryLen, _, err := decodeLength(r)
+				if err != nil {
+					return fmt.Errorf("failed to decode RDB hashtable expiry length: %w", err)
+				}
+				_ = expiryLen
+				for range dataLen {
+					typeByte, err := r.ReadByte()
+					if err != nil {
+						return fmt.Errorf("failed to read RDB hashtable entry type: %w", err)
+					}
+					if typeByte != 0x00 {
+						return fmt.Errorf("unsupported RDB hashtable entry type: %x", typeByte)
+					}
+					key, val, err := decodeKV(r)
+					if err != nil {
+						return fmt.Errorf("failed to decode RDB hashtable entry key-value pair: %w", err)
+					}
+					fmt.Println("Loading KV", key, val)
+					e.storage.Set(key, val)
+				}
+
+			}
+		}
+
+	}
+
+	return nil
 }
 
 func (e *engine) StartReplicationIfSlave() error {
@@ -943,3 +1069,16 @@ func (e *engine) handleConfig(command []string) []byte {
 		return encodeErrorMessage("unknown CONFIG subcommand: " + subcommand)
 	}
 }
+
+func (e *engine) handleKeys(command []string) []byte {
+	if len(command) < 2 {
+		return encodeInvalidArgCount("KEYS")
+	}
+	pattern := command[1]
+	keys, err := e.storage.GetMatchingKeys(pattern)
+	if err != nil {
+		return encodeError(err)
+	}
+	return encodeResp(keys)
+}
+

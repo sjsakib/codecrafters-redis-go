@@ -19,6 +19,7 @@ type Storage interface {
 	GetOrMakeStream(key string) (*Stream, error)
 	GetStreamTopID(key string) (*EntryID, error)
 	Expire(key string, duration time.Duration) bool
+	GetMatchingKeys(pattern string) ([]string, error)
 }
 
 type inMemoryStorage struct {
@@ -119,4 +120,21 @@ func (s *inMemoryStorage) Expire(key string, duration time.Duration) bool {
 	}
 	s.expirations[key] = time.Now().Add(duration)
 	return true
+}
+
+func (s *inMemoryStorage) GetMatchingKeys(pattern string) ([]string, error) {
+	matchingKeys := []string{}
+	for key := range s.data {
+		if matchPattern(key, pattern) {
+			matchingKeys = append(matchingKeys, key)
+		}
+	}
+	return matchingKeys, nil
+}
+
+func matchPattern(key, pattern string) bool {
+	if pattern == "*" {
+		return true
+	}
+	return key == pattern
 }
