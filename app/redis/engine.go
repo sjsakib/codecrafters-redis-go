@@ -2,6 +2,7 @@ package redis
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -332,14 +333,14 @@ func (e *engine) LoadRDBFileIfPresent() error {
 
 	dirAbsPath, err := filepath.Abs(e.config.Dir)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path of DB directory: %w", err)
+		return fmt.Errorf("RDB: failed to get absolute path of DB directory: %w", err)
 	}
 
 	fullPath := filepath.Join(dirAbsPath, e.config.DBFilename)
 	file, err := os.Open(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Println("RDB file does not exist")
+			fmt.Println("RDB: file does not exist")
 			return nil
 		}
 		return fmt.Errorf("failed to open RDB file: %w", err)
@@ -352,7 +353,7 @@ func (e *engine) LoadRDBFileIfPresent() error {
 func (e *engine) loadRDB(reader io.Reader) error {
 	r := bufio.NewReader(reader)
 
-	fmt.Println("Reading DB")
+	fmt.Println("RDB: Reading DB")
 
 	var magic [9]byte
 	_, err := r.Read(magic[:])
@@ -360,15 +361,15 @@ func (e *engine) loadRDB(reader io.Reader) error {
 		return fmt.Errorf("failed to read RDB magic: %w", err)
 	}
 
-	fmt.Println("Reading RDB version: ", string(magic[:]))
+	fmt.Println("RDB: found version: ", string(magic[:]))
 
 	for {
 		marker, err := r.ReadByte()
 		if err != nil {
 			if err == io.EOF {
-				fmt.Println("Finished reading RDB file")
+				fmt.Println("RDB: Finished reading RDB file")
 			}
-			return fmt.Errorf("failed to read RDB marker: %w", err)
+			return fmt.Errorf("RDB: failed to read RDB marker: %w", err)
 		}
 
 		if marker != 0xFA {
@@ -378,7 +379,7 @@ func (e *engine) loadRDB(reader io.Reader) error {
 		k, v, err := decodeKV(r)
 
 		if err != nil {
-			return fmt.Errorf("failed to decode RDB key-value pair: %w", err)
+			return fmt.Errorf("RDB: failed to decode RDB key-value pair: %w", err)
 		}
 
 		fmt.Printf("%s: %s\n", k, v)
@@ -387,7 +388,7 @@ func (e *engine) loadRDB(reader io.Reader) error {
 	for {
 		marker, err := r.ReadByte()
 		if err != nil {
-			return fmt.Errorf("failed to read RDB EOF marker: %w", err)
+			return fmt.Errorf("RDB: failed to read RDB EOF marker: %w", err)
 		}
 		if marker != 0xFE {
 			r.UnreadByte()
@@ -395,13 +396,17 @@ func (e *engine) loadRDB(reader io.Reader) error {
 		}
 		index, _, err := decodeLength(r)
 		if err != nil {
-			return fmt.Errorf("failed to decode RDB database index: %w", err)
+			return fmt.Errorf("RDB: failed to decode RDB database index: %w", err)
 		}
-		fmt.Printf("\nReading DB with index %d\n", index)
+		fmt.Printf("\nRDB: reading DB with index %d\n", index)
 		for {
 			marker, err := r.ReadByte()
 			if err != nil {
-				return fmt.Errorf("failed to read RDB database EOF marker: %w", err)
+				if err == io.EOF {
+					fmt.Println("RDB: finished reading RDB file")
+					return nil
+				}
+				return fmt.Errorf("RDB: failed to read RDB database EOF marker: %w", err)
 			}
 			if marker == 0xFB {
 				fmt.Println("Reading hashtable")
@@ -409,25 +414,50 @@ func (e *engine) loadRDB(reader io.Reader) error {
 				if err != nil {
 					return fmt.Errorf("failed to decode RDB hashtable length: %w", err)
 				}
-				expiryLen, _, err := decodeLength(r)
+				expLen, _, err := decodeLength(r)
 				if err != nil {
 					return fmt.Errorf("failed to decode RDB hashtable expiry length: %w", err)
 				}
-				_ = expiryLen
-				for range dataLen {
+				fmt.Println("data: ", dataLen, "exp: ", expLen)
+				var expTime *time.Time
+				for range dataLen + expLen {
 					typeByte, err := r.ReadByte()
 					if err != nil {
 						return fmt.Errorf("failed to read RDB hashtable entry type: %w", err)
 					}
-					if typeByte != 0x00 {
-						return fmt.Errorf("unsupported RDB hashtable entry type: %x", typeByte)
+					switch typeByte {
+					case 0x00:
+						key, val, err := decodeKV(r)
+						if err != nil {
+							return fmt.Errorf("failed to decode RDB hashtable entry key-value pair: %w", err)
+						}
+						fmt.Println("RDB: found KV", key, val)
+
+						e.storage.Set(key, val)
+						if expTime != nil {
+							e.storage.ExpireTime(key, *expTime)
+							expTime = nil
+						}
+					case 0xFC:
+						var expBytes [8]byte
+						_, err := r.Read(expBytes[:])
+						if err != nil {
+							return fmt.Errorf("RDB: failed to read RDB hashtable entry expiry: %w", err)
+						}
+						t := time.UnixMilli(int64(binary.LittleEndian.Uint64(expBytes[:])))
+						expTime = &t
+					case 0xFD:
+						var expBytes [4]byte
+						_, err := r.Read(expBytes[:])
+						if err != nil {
+							return fmt.Errorf("RDB: failed to read RDB hashtable entry expiry: %w", err)
+						}
+						t := time.Unix(int64(binary.LittleEndian.Uint32(expBytes[:])), 0)
+						expTime = &t
+					default:
+						return fmt.Errorf("RDB: unsupported RDB hashtable entry type: %d", typeByte)
 					}
-					key, val, err := decodeKV(r)
-					if err != nil {
-						return fmt.Errorf("failed to decode RDB hashtable entry key-value pair: %w", err)
-					}
-					fmt.Println("Loading KV", key, val)
-					e.storage.Set(key, val)
+					// e.storage.ExpireTime(key, expTime)
 				}
 
 			}
@@ -1081,4 +1111,3 @@ func (e *engine) handleKeys(command []string) []byte {
 	}
 	return encodeResp(keys)
 }
-

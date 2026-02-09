@@ -19,6 +19,7 @@ type Storage interface {
 	GetOrMakeStream(key string) (*Stream, error)
 	GetStreamTopID(key string) (*EntryID, error)
 	Expire(key string, duration time.Duration) bool
+	ExpireTime(key string, duration time.Time) bool
 	GetMatchingKeys(pattern string) ([]string, error)
 }
 
@@ -119,6 +120,15 @@ func (s *inMemoryStorage) Expire(key string, duration time.Duration) bool {
 		return false
 	}
 	s.expirations[key] = time.Now().Add(duration)
+	return true
+}
+
+func (s *inMemoryStorage) ExpireTime(key string, duration time.Time) bool {
+	_, exists := s.data[key]
+	if !exists {
+		return false
+	}
+	s.expirations[key] = duration
 	return true
 }
 
