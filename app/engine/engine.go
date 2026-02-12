@@ -122,6 +122,15 @@ func (e *engine) Handle(req *Request) *Response {
 		return &response
 	}
 
+	if !e.verifySubscribed(req) {
+		errMsg := fmt.Sprintf(
+			"Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
+			strings.ToLower(req.Command[0]))
+		response.Data = resp.EncodeErrorMessage(errMsg)
+		req.ResCh <- &response
+		return &response
+	}
+
 	command := req.Command
 
 	shouldClose := true
@@ -1079,6 +1088,26 @@ func (e *engine) handleKeys(command []string) []byte {
 		return resp.EncodeError(err)
 	}
 	return resp.EncodeResp(keys)
+}
+
+func (e *engine) verifySubscribed(req *Request) bool {
+	subCount, exists := e.subCount[req.ConnId]
+	if !exists || subCount == 0 {
+		return true
+	}
+
+	command := Command(req.Command[0])
+	allowedCommands := map[Command]bool{
+		CmdSubscribe:   true,
+		CmdUnsubscribe: true,
+		CmdPing:        true,
+		CmdQuit:        true,
+	}
+
+	if _, ok := allowedCommands[command]; ok {
+		return true
+	}
+	return false
 }
 
 func (e *engine) handleSubscribe(req *Request) []byte {
