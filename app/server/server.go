@@ -13,19 +13,22 @@ type Server interface {
 	Start(address string) error
 }
 
-type goroutineMux struct {
+type goroutineServer struct {
 	engine engine.Engine
 }
 
 func NewServer(engine engine.Engine) Server {
-	return &goroutineMux{
+	return &goroutineServer{
 		engine: engine,
 	}
 }
 
-func (m *goroutineMux) Start(address string) error {
+func (s *goroutineServer) Start(address string) error {
 
-	m.engine.StartLoop()
+	err := s.engine.StartLoop()
+	if err != nil {
+		return fmt.Errorf("failed to start engine loop: %s", err)
+	}
 
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -39,11 +42,11 @@ func (m *goroutineMux) Start(address string) error {
 			return fmt.Errorf("failed to accept connection: %s", err)
 		}
 
-		go m.handleConnection(conn, m.engine.ReqCh())
+		go s.handleConnection(conn)
 	}
 }
 
-func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *engine.RawReq) {
+func (s *goroutineServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	buffer := make([]byte, 1024) // if the command exceeds 1024 bytes, it will be truncated for now
 
@@ -62,15 +65,15 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *engine.
 
 		timeStamp := time.Now()
 
-		resChan := make(chan *engine.RawResp)
-		req := engine.RawReq{
+		resChan := make(chan *engine.Response)
+		req := engine.Request{
 			Input:     buffer[:n],
 			ResCh:     resChan,
 			Timestamp: timeStamp,
 			ConnId:    connId,
 		}
 
-		requestChan <- &req
+		s.engine.ReqCh() <- &req
 
 		go func() {
 			for {

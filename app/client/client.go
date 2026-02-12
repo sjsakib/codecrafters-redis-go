@@ -33,12 +33,12 @@ func (c *tcpClient) Do(command []string) (any, error) {
 		return nil, fmt.Errorf("failed to send command: %w", err)
 	}
 
-	rsp, err := c.Read()
+	response, err := c.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	data, err := resp.Parse(bytes.NewReader(rsp))
+	data, err := resp.Parse(bytes.NewReader(response))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
