@@ -14,31 +14,32 @@ import (
 type Command string
 
 const (
-	CmdPing     Command = "PING"
-	CmdSet      Command = "SET"
-	CmdGet      Command = "GET"
-	CmdRPush    Command = "RPUSH"
-	CmdLPush    Command = "LPUSH"
-	CmdLRange   Command = "LRANGE"
-	CmdLLen     Command = "LLEN"
-	CmdLPop     Command = "LPOP"
-	CmdBLPop    Command = "BLPOP"
-	CmdType     Command = "TYPE"
-	CmdXAdd     Command = "XADD"
-	CmdXRange   Command = "XRANGE"
-	CmdXRead    Command = "XREAD"
-	CmdIncr     Command = "INCR"
-	CmdMulti    Command = "MULTI"
-	CmdExec     Command = "EXEC"
-	CmdDiscard  Command = "DISCARD"
-	CmdInfo     Command = "INFO"
-	CmdDel      Command = "DEL"
-	CmdPsync    Command = "PSYNC"
-	CmdReplConf Command = "REPLCONF"
-	CmdEcho     Command = "ECHO"
-	CmdWait     Command = "WAIT"
-	CmdConfig   Command = "CONFIG"
-	CmdKeys     Command = "KEYS"
+	CmdPing      Command = "PING"
+	CmdSet       Command = "SET"
+	CmdGet       Command = "GET"
+	CmdRPush     Command = "RPUSH"
+	CmdLPush     Command = "LPUSH"
+	CmdLRange    Command = "LRANGE"
+	CmdLLen      Command = "LLEN"
+	CmdLPop      Command = "LPOP"
+	CmdBLPop     Command = "BLPOP"
+	CmdType      Command = "TYPE"
+	CmdXAdd      Command = "XADD"
+	CmdXRange    Command = "XRANGE"
+	CmdXRead     Command = "XREAD"
+	CmdIncr      Command = "INCR"
+	CmdMulti     Command = "MULTI"
+	CmdExec      Command = "EXEC"
+	CmdDiscard   Command = "DISCARD"
+	CmdInfo      Command = "INFO"
+	CmdDel       Command = "DEL"
+	CmdPsync     Command = "PSYNC"
+	CmdReplConf  Command = "REPLCONF"
+	CmdEcho      Command = "ECHO"
+	CmdWait      Command = "WAIT"
+	CmdConfig    Command = "CONFIG"
+	CmdKeys      Command = "KEYS"
+	CmdSubscribe Command = "SUBSCRIBE"
 )
 
 type Engine interface {
@@ -82,6 +83,7 @@ type engine struct {
 	slaveReqs        []*RawReq
 	ackMap           map[string]*WaitReq
 	config           Config
+	channels         map[string][]*RawReq
 }
 
 func NewEngine(storage Storage, masterAddress string) Engine {
@@ -98,6 +100,7 @@ func NewEngine(storage Storage, masterAddress string) Engine {
 		timeoutCh:   make(chan *TimeOut, 100),
 		slaveReqs:   make([]*RawReq, 0),
 		ackMap:      make(map[string]*WaitReq),
+		channels:    make(map[string][]*RawReq),
 	}
 }
 
@@ -230,6 +233,8 @@ func (e *engine) Handle(req *RawReq) *RawResp {
 		resp.Data = e.handleConfig(command)
 	case CmdKeys:
 		resp.Data = e.handleKeys(command)
+	case CmdSubscribe:
+		resp.Data = e.handleSubscribe(req)
 	default:
 		resp.Data = encodeErrorMessage("unknown command: " + command[0])
 	}
@@ -1110,4 +1115,35 @@ func (e *engine) handleKeys(command []string) []byte {
 		return encodeError(err)
 	}
 	return encodeResp(keys)
+}
+
+func (e *engine) handleSubscribe(req *RawReq) []byte {
+	command := req.command
+	if len(command) < 2 {
+		return encodeInvalidArgCount(command[0])
+	}
+
+	channels := command[1:]
+	subCount := 0
+	for _, channel := range channels {
+		subscribers, exists := e.channels[channel]
+		if !exists {
+			subscribers = make([]*RawReq, 0)
+		}
+		subscribers = append(subscribers, req)
+		e.channels[channel] = subscribers
+
+		for _, subscriber := range subscribers {
+			if subscriber == req {
+				subCount++
+			}
+		}
+	}
+	
+	for _, channel := range channels {
+		resp := RawResp{}
+		resp.Data = encodeResp([]any{"subscribe", channel, subCount})
+		req.resCh <- &resp
+	}
+	return nil
 }
