@@ -137,7 +137,12 @@ func (e *engine) Handle(req *Request) *Response {
 
 	switch Command(command[0]) {
 	case CmdPing:
-		response.Data = resp.EncodeSimpleString("PONG")
+		if e.isSubscribed(req) {
+			response.Data = resp.EncodeArray([]string{"pong", ""})
+		} else {
+			response.Data = resp.EncodeSimpleString("PONG")
+		}
+
 	case CmdEcho:
 		if len(command) < 2 {
 			response.Data = resp.EncodeErrorMessage("wrong number of arguments for 'ECHO' command")
@@ -1090,9 +1095,13 @@ func (e *engine) handleKeys(command []string) []byte {
 	return resp.EncodeResp(keys)
 }
 
-func (e *engine) verifySubscribed(req *Request) bool {
+func (e *engine) isSubscribed(req *Request) bool {
 	subCount, exists := e.subCount[req.ConnId]
-	if !exists || subCount == 0 {
+	return exists && subCount > 0
+}
+
+func (e *engine) verifySubscribed(req *Request) bool {
+	if !e.isSubscribed(req) {
 		return true
 	}
 
