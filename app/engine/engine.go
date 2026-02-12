@@ -43,6 +43,7 @@ type engine struct {
 
 	// pub/sub
 	channels map[string][]*Request
+	subCount map[string]int
 }
 
 func NewEngine(storage storage.Storage, masterAddress string) Engine {
@@ -61,6 +62,7 @@ func NewEngine(storage storage.Storage, masterAddress string) Engine {
 		slaveReqs:   make([]*Request, 0),
 		ackMap:      make(map[string]*WaitReq),
 		channels:    make(map[string][]*Request),
+		subCount:    make(map[string]int),
 	}
 }
 
@@ -1086,26 +1088,33 @@ func (e *engine) handleSubscribe(req *Request) []byte {
 	}
 
 	channels := command[1:]
-	subCount := 0
+	subCount, exists := e.subCount[req.ConnId]
+	if !exists {
+		subCount = 0
+	}
 	for _, channel := range channels {
 		subscribers, exists := e.channels[channel]
 		if !exists {
 			subscribers = make([]*Request, 0)
 		}
-		subscribers = append(subscribers, req)
-		e.channels[channel] = subscribers
 
+		isSubscribed := false
 		for _, subscriber := range subscribers {
 			if subscriber == req {
-				subCount++
+				isSubscribed = true
 			}
 		}
-	}
 
-	for _, channel := range channels {
+		if !isSubscribed {
+			subscribers = append(subscribers, req)
+			subCount++
+		}
+		e.channels[channel] = subscribers
+
 		response := Response{}
 		response.Data = resp.EncodeResp([]any{"subscribe", channel, subCount})
 		req.ResCh <- &response
 	}
+	e.subCount[req.ConnId] = subCount
 	return nil
 }
