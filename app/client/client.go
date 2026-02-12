@@ -1,9 +1,11 @@
-package redis
+package client
 
 import (
 	"bytes"
 	"fmt"
 	"net"
+
+	"github.com/codecrafters-io/redis-starter-go/app/resp"
 )
 
 type Client interface {
@@ -31,12 +33,12 @@ func (c *tcpClient) Do(command []string) (any, error) {
 		return nil, fmt.Errorf("failed to send command: %w", err)
 	}
 
-	resp, err := c.Read()
+	rsp, err := c.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	data, err := parse(bytes.NewReader(resp))
+	data, err := resp.Parse(bytes.NewReader(rsp))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -53,7 +55,7 @@ func (c *tcpClient) Send(command []string) error {
 		c.conn = conn
 	}
 
-	_, err := c.conn.Write(encodeResp(command))
+	_, err := c.conn.Write(resp.EncodeResp(command))
 	if err != nil {
 		return fmt.Errorf("failed to write to connection: %w", err)
 	}

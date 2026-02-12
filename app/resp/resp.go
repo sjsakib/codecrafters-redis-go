@@ -1,10 +1,13 @@
-package redis
+package resp
 
 import (
 	"bytes"
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/codecrafters-io/redis-starter-go/app/storage"
+	"github.com/codecrafters-io/redis-starter-go/app/utils"
 )
 
 const intFmtStr = "%d\r\n"
@@ -14,12 +17,12 @@ type CmdWithLen struct {
 	Length  int
 }
 
-func parseCommands(input []byte) ([]CmdWithLen, error) {
+func ParseCommands(input []byte) ([]CmdWithLen, error) {
 	commands := make([]CmdWithLen, 0)
 	reader := bytes.NewReader(input)
 	lastOffset := int64(0)
 	for {
-		command, err := parse(reader)
+		command, err := Parse(reader)
 		if err != nil {
 			if err.Error() == "EOF" {
 				break
@@ -34,8 +37,8 @@ func parseCommands(input []byte) ([]CmdWithLen, error) {
 	return commands, nil
 }
 
-func parseCommand(input []byte) ([]string, error) {
-	command, err := parse(bytes.NewReader(input))
+func ParseCommand(input []byte) ([]string, error) {
+	command, err := Parse(bytes.NewReader(input))
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +46,7 @@ func parseCommand(input []byte) ([]string, error) {
 	return command, nil
 }
 
-func parse(reader *bytes.Reader) ([]string, error) {
+func Parse(reader *bytes.Reader) ([]string, error) {
 
 	switch b, err := reader.ReadByte(); b {
 	case '*':
@@ -54,7 +57,7 @@ func parse(reader *bytes.Reader) ([]string, error) {
 		for i := 0; i < numArgs; i++ {
 			var length int
 			fmt.Fscanf(reader, intFmtStr, &length)
-			command, err := parse(reader)
+			command, err := Parse(reader)
 
 			if err != nil {
 				return nil, err
@@ -80,7 +83,7 @@ func parse(reader *bytes.Reader) ([]string, error) {
 		}
 		return []string{command}, nil
 	case '+':
-		line, err := readLine(reader)
+		line, err := utils.ReadLine(reader)
 		if err != nil {
 			return nil, err
 		}
@@ -98,102 +101,80 @@ func parse(reader *bytes.Reader) ([]string, error) {
 
 }
 
-func readLine(r *bytes.Reader) (string, error) {
-    var sb strings.Builder
-    for {
-        b, err := r.ReadByte()
-        if err != nil {
-            return "", err
-        }
-        if b == '\r' {
-            b2, err := r.ReadByte()
-            if err != nil {
-                return "", err
-            }
-            if b2 != '\n' {
-                return "", fmt.Errorf("expected LF after CR")
-            }
-            break
-        }
-        sb.WriteByte(b)
-    }
-    return sb.String(), nil
-}
-
-func encodeResp(val any) []byte {
+func EncodeResp(val any) []byte {
 	switch v := val.(type) {
 	case string:
-		return encodeBulkString(v)
+		return EncodeBulkString(v)
 	case int:
 		return fmt.Appendf(nil, ":%d\r\n", v)
 	case int64:
 		return fmt.Appendf(nil, ":%d\r\n", v)
 	case []string:
-		return encodeArray(v)
+		return EncodeArray(v)
 	case [](any):
-		return encodeArray(v)
-	case []StreamEntry:
-		return encodeArray(v)
+		return EncodeArray(v)
+	case []storage.StreamEntry:
+		return EncodeArray(v)
 	case []byte:
 		return v
-	case StreamEntry:
+	case storage.StreamEntry:
 		var buffer bytes.Buffer
 		fmt.Fprintf(&buffer, "*2\r\n")
-		buffer.Write(encodeResp(v.ID))
+		buffer.Write(EncodeResp(v.ID))
 		fmt.Fprintf(&buffer, "*%d\r\n", len(v.Fields)*2)
 		for field, value := range v.Fields {
-			buffer.Write(encodeResp(field))
-			buffer.Write(encodeResp(value))
+			buffer.Write(EncodeResp(field))
+			buffer.Write(EncodeResp(value))
 		}
 		return buffer.Bytes()
-	case EntryID:
-		return encodeBulkString(fmt.Sprintf("%d-%d", v.T, v.S))
+	case storage.EntryID:
+		return EncodeResp(fmt.Sprintf("%d-%d", v.T, v.S))
 	case nil:
-		return encodeNull()
+		return EncodeResp(nil)
 	default:
-		return encodeErrorMessage("failed to encode response: unknown type")
+		return EncodeErrorMessage("failed to encode response: unknown type")
 	}
 }
 
-func encodeArray[T any](items []T) []byte {
+func EncodeArray[T any](items []T) []byte {
 	var buffer bytes.Buffer
 	fmt.Fprintf(&buffer, "*%d\r\n", len(items))
 	for _, item := range items {
-		buffer.Write(encodeResp(item))
+		buffer.Write(EncodeResp(item))
 	}
 	return buffer.Bytes()
 }
 
-func encodeBulkString(s string) []byte {
+func EncodeBulkString(s string) []byte {
 	return fmt.Appendf(nil, "$%d\r\n%s\r\n", len(s), s)
 }
 
-func encodeError(err error) []byte {
+func EncodeError(err error) []byte {
 	switch err {
-	case ErrWrongType:
+	case storage.ErrWrongType:
 		return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n")
-	case ErrKeyNotFound:
+	case storage.ErrKeyNotFound:
 		return []byte("$-1\r\n")
 	default:
 		return fmt.Appendf(nil, "-ERR %s\r\n", err.Error())
 	}
 }
 
-func encodeNull() []byte {
+func EncodeNull() []byte {
 	return []byte("$-1\r\n")
 }
-func encodeNullArray() []byte {
+func EncodeNullArray() []byte {
 	return []byte("*-1\r\n")
 }
 
-func encodeErrorMessage(message string) []byte {
+func EncodeErrorMessage(message string) []byte {
 	return fmt.Appendf(nil, "-ERR %s\r\n", message)
 }
 
-func encodeSimpleString(s string) []byte {
+func EncodeSimpleString(s string) []byte {
 	return fmt.Appendf(nil, "+%s\r\n", s)
 }
 
-func encodeInvalidArgCount(command string) []byte {
+func EncodeInvalidArgCount(command string) []byte {
 	return fmt.Appendf(nil, "-ERR wrong number of arguments for '%s' command\r\n", command)
 }

@@ -6,7 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/codecrafters-io/redis-starter-go/app/redis"
+	"github.com/codecrafters-io/redis-starter-go/app/engine"
+	"github.com/codecrafters-io/redis-starter-go/app/server"
+	"github.com/codecrafters-io/redis-starter-go/app/storage"
 )
 
 func main() {
@@ -29,14 +31,14 @@ func main() {
 		masterAddress = fmt.Sprintf("%s:%s", parts[0], parts[1])
 	}
 
-	storage := redis.NewInMemoryStorage()
-	engine := redis.NewEngine(storage, masterAddress)
-	engine.SetConfig(redis.Config{
+	s := storage.NewInMemoryStorage()
+	e := engine.NewEngine(s, masterAddress)
+	e.SetConfig(engine.Config{
 		DBFilename: *dbfilename,
 		Dir:        *dir,
 	})
 
-	server := redis.NewServer(engine)
+	server := server.NewServer(e)
 
 	if err := server.Start(fmt.Sprintf(":%d", *port)); err != nil {
 		fmt.Println("Failed to start server:", err)

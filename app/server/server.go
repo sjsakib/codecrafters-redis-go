@@ -1,34 +1,23 @@
-package redis
+package server
 
 import (
 	"fmt"
 	"net"
 	"time"
+
+	"github.com/codecrafters-io/redis-starter-go/app/engine"
+	"github.com/codecrafters-io/redis-starter-go/app/utils"
 )
-
-type RawReq struct {
-	input              []byte
-	command            []string
-	resCh              chan *RawResp
-	timeStamp          time.Time
-	connId             string
-	isTimeoutScheduled bool
-}
-
-type RawResp struct {
-	Data      []byte
-	RetryWait *time.Duration
-}
 
 type Server interface {
 	Start(address string) error
 }
 
 type goroutineMux struct {
-	engine Engine
+	engine engine.Engine
 }
 
-func NewServer(engine Engine) Server {
+func NewServer(engine engine.Engine) Server {
 	return &goroutineMux{
 		engine: engine,
 	}
@@ -54,11 +43,11 @@ func (m *goroutineMux) Start(address string) error {
 	}
 }
 
-func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq) {
+func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *engine.RawReq) {
 	defer conn.Close()
 	buffer := make([]byte, 1024) // if the command exceeds 1024 bytes, it will be truncated for now
 
-	connId := randomID()
+	connId := utils.RandomID()
 
 	for {
 		n, err := conn.Read(buffer)
@@ -73,12 +62,12 @@ func (m *goroutineMux) handleConnection(conn net.Conn, requestChan chan *RawReq)
 
 		timeStamp := time.Now()
 
-		resChan := make(chan *RawResp)
-		req := RawReq{
-			input:     buffer[:n],
-			resCh:     resChan,
-			timeStamp: timeStamp,
-			connId:    connId,
+		resChan := make(chan *engine.RawResp)
+		req := engine.RawReq{
+			Input:     buffer[:n],
+			ResCh:     resChan,
+			Timestamp: timeStamp,
+			ConnId:    connId,
 		}
 
 		requestChan <- &req

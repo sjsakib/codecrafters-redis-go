@@ -1,4 +1,4 @@
-package redis
+package rdb
 
 import (
 	"bufio"
@@ -7,7 +7,7 @@ import (
 	"io"
 )
 
-func decodeLength(r *bufio.Reader) (uint64, byte, error) {
+func DecodeLength(r *bufio.Reader) (uint64, byte, error) {
 	firstByte, err := r.ReadByte()
 	if err != nil {
 		return 0, 0, err
@@ -46,8 +46,8 @@ func decodeLength(r *bufio.Reader) (uint64, byte, error) {
 	return uint64(firstByte << 2), 0, nil
 }
 
-func decodeValue(r *bufio.Reader) (any, error) {
-	length, typ, err := decodeLength(r)
+func DecodeValue(r *bufio.Reader) (any, error) {
+	length, typ, err := DecodeLength(r)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func decodeValue(r *bufio.Reader) (any, error) {
 }
 
 func decodeString(r *bufio.Reader) (string, error) {
-	value, err := decodeValue(r)
+	value, err := DecodeValue(r)
 	if err != nil {
 		return "", err
 	}
@@ -85,12 +85,12 @@ func decodeString(r *bufio.Reader) (string, error) {
 	return string(strBytes), nil
 }
 
-func decodeKV(r *bufio.Reader) (string, string, error) {
+func DecodeKV(r *bufio.Reader) (string, string, error) {
 	key, err := decodeString(r)
 	if err != nil {
 		return "", "", err
 	}
-	value, err := decodeValue(r)
+	value, err := DecodeValue(r)
 	if err != nil {
 		return "", "", err
 	}

@@ -1,4 +1,4 @@
-package redis
+package storage
 
 import (
 	"errors"
@@ -91,7 +91,7 @@ func (s *Stream) GetRange(startID EntryID, endID *EntryID) []StreamEntry {
 	return result
 }
 
-func parseRangeID(idStr string, isStart bool) (EntryID, error) {
+func ParseRangeID(idStr string, isStart bool) (EntryID, error) {
 	if idStr == "-" {
 		return EntryID{T: 0, S: 0}, nil
 	}
