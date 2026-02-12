@@ -213,6 +213,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleKeys(command)
 	case CmdSubscribe:
 		response.Data = e.handleSubscribe(req)
+	case CmdPublish:
+		response.Data = e.handlePub(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}
@@ -1155,4 +1157,24 @@ func (e *engine) handleSubscribe(req *Request) []byte {
 	}
 	e.subCount[req.ConnId] = subCount
 	return nil
+}
+
+func (e *engine) handlePub(command []string) []byte {
+	if len(command) < 3 {
+		return resp.EncodeInvalidArgCount(command[0])
+	}
+	
+	channel := command[1]
+	message := command[2]
+	subscribers, exists := e.channels[channel]
+	if !exists {
+		return resp.EncodeResp(0)
+	}
+	
+	for _, subscriber := range subscribers {
+		response := Response{}
+		response.Data = resp.EncodeResp([]any{"message", channel, message})
+		subscriber.ResCh <- &response
+	}
+	return resp.EncodeResp(len(subscribers))
 }

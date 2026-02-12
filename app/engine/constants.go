@@ -29,6 +29,7 @@ const (
 	CmdConfig       Command = "CONFIG"
 	CmdKeys         Command = "KEYS"
 	CmdSubscribe    Command = "SUBSCRIBE"
+	CmdPublish      Command = "PUBLISH"
 	CmdUnsubscribe  Command = "UNSUBSCRIBE"
 	CmdPSubscribe   Command = "PSUBSCRIBE"
 	CmdPUnsubscribe Command = "PUNSUBSCRIBE"
