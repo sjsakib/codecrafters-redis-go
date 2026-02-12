@@ -215,6 +215,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleSubscribe(req)
 	case CmdPublish:
 		response.Data = e.handlePub(command)
+	case CmdUnsubscribe:
+		response.Data = e.handleUnsubscribe(req)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}
@@ -1177,4 +1179,41 @@ func (e *engine) handlePub(command []string) []byte {
 		subscriber.ResCh <- &response
 	}
 	return resp.EncodeResp(len(subscribers))
+}
+
+func (e *engine) handleUnsubscribe(req *Request) []byte {
+	command := req.Command
+	if len(command) < 2 {
+		return resp.EncodeInvalidArgCount(command[0])
+	}
+	
+	channels := command[1:]
+	subCount, exists := e.subCount[req.ConnId]
+	if !exists {
+		subCount = 0
+	}
+	for _, channel := range channels {
+		subscribers, exists := e.channels[channel]
+		if !exists {
+			subscribers = make([]*Request, 0)
+		}
+		
+		newSubscribers := make([]*Request, 0)
+		for _, subscriber := range subscribers {
+			if subscriber.ConnId == req.ConnId {
+				subCount--
+				close(subscriber.ResCh)
+			} else {
+				newSubscribers = append(newSubscribers, subscriber)
+			}
+		}
+		e.channels[channel] = newSubscribers
+		
+		response := Response{}
+		response.Data = resp.EncodeResp([]any{"unsubscribe", channel, subCount})
+		req.ResCh <- &response
+	}
+	e.subCount[req.ConnId] = subCount
+	close(req.ResCh)
+	return nil
 }
