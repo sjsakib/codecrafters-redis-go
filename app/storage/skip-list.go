@@ -88,6 +88,30 @@ func (s *SkipList[T]) Rank(value T) int {
 
 }
 
+func (s *SkipList[T]) Range(start, stop int) []T {
+	ground := s.floors[0]
+	cur := ground.head
+	result := make([]T, 0)
+	index := 0
+	if start < 0 {
+		start = s.length + start
+	}
+	if stop < 0 {
+		stop = s.length + stop
+	}
+	for cur != nil {
+		if index >= start && index <= stop {
+			result = append(result, cur.value)
+		}
+		if index > stop {
+			break
+		}
+		index++
+		cur = cur.next
+	}
+	return result
+}
+
 func (s *SkipList[T]) insert(score float64, value T) {
 	ground := s.floors[0]
 	node := &Node[T]{

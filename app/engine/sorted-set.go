@@ -48,3 +48,27 @@ func (e *engine) handleZRank(command []string) []byte {
 	}
 	return resp.EncodeResp(int64(rank))
 }
+
+func (e *engine) handleZRange(command []string) []byte {
+	if len(command) < 4 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'ZRANGE' command")
+	}
+	key := command[1]
+	sortedSet, err := e.storage.GetOrMakeSortedSet(key)
+	if err != nil {
+		return resp.EncodeErrorMessage(err.Error())
+	}
+	
+	start, err := strconv.Atoi(command[2])
+	if err != nil {
+		return resp.EncodeErrorMessage("start must be an integer")
+	}
+	stop, err := strconv.Atoi(command[3])
+	if err != nil {
+		return resp.EncodeErrorMessage("stop must be an integer")
+	}
+	
+	members := sortedSet.Range(start, stop)
+	return resp.EncodeArray(members)
+}
+
