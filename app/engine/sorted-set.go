@@ -107,6 +107,31 @@ func (e *engine) handleZScore(command []string) []byte {
 	return resp.EncodeResp(score)
 }
 
+func (e *engine) handleZRem(command []string) []byte {
+	if len(command) < 3 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'ZREM' command")
+	}
+	key := command[1]
+	sortedSet, err := e.storage.GetSortedSet(key)
+	if err != nil {
+		if err == storage.ErrKeyNotFound {
+			return resp.EncodeResp(int64(0))
+		}
+		return resp.EncodeErrorMessage(err.Error())
+	}
+	
+	removedCount := 0
+	for i := 2; i < len(command); i++ {
+		member := command[i]
+		if sortedSet.Remove(member) {
+			removedCount++
+		}
+	}
+	
+	return resp.EncodeResp(int64(removedCount))
+
+}
+
 
 
 

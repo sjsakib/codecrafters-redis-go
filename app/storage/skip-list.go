@@ -71,6 +71,14 @@ func (s *SkipList[T]) Add(score float64, value T) bool {
 	return !exists
 }
 
+func (s *SkipList[T]) Remove(value T) bool {
+	removed := s.delete(value)
+	if removed {
+		delete(s.scoreMap, value)
+	}
+	return removed
+}
+
 func (s *SkipList[T]) Rank(value T) int {
 	_, exists := s.scoreMap[value]
 	if !exists {
@@ -116,7 +124,6 @@ func (s *SkipList[T]) GetScore(value T) (float64, bool) {
 	score, exists := s.scoreMap[value]
 	return score, exists
 }
-
 
 func (s *SkipList[T]) insert(score float64, value T) {
 	ground := s.floors[0]
