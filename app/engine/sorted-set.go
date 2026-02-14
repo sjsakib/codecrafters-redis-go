@@ -72,3 +72,17 @@ func (e *engine) handleZRange(command []string) []byte {
 	return resp.EncodeArray(members)
 }
 
+func (e *engine) handleZCard(command []string) []byte {
+	if len(command) < 2 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'ZCARD' command")
+	}
+	key := command[1]
+	sortedSet, err := e.storage.GetOrMakeSortedSet(key)
+	if err != nil {
+		return resp.EncodeErrorMessage(err.Error())
+	}
+
+	return resp.EncodeResp(int64(sortedSet.Size()))
+}
+
+

@@ -223,6 +223,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleZRank(command)
 	case CmdZRange:
 		response.Data = e.handleZRange(command)
+	case CmdZCard:
+		response.Data = e.handleZCard(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}
