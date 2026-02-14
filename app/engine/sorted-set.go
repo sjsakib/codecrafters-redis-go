@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/codecrafters-io/redis-starter-go/app/resp"
+	"github.com/codecrafters-io/redis-starter-go/app/storage"
 )
 
 func (e *engine) handleZAdd(command []string) []byte {
@@ -90,8 +91,11 @@ func (e *engine) handleZScore(command []string) []byte {
 		return resp.EncodeErrorMessage("wrong number of arguments for 'ZSCORE' command")
 	}
 	key := command[1]
-	sortedSet, err := e.storage.GetOrMakeSortedSet(key)
+	sortedSet, err := e.storage.GetSortedSet(key)
 	if err != nil {
+		if err == storage.ErrKeyNotFound {
+			return resp.EncodeNull()
+		}
 		return resp.EncodeErrorMessage(err.Error())
 	}
 	

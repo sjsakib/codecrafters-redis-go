@@ -21,6 +21,7 @@ type Storage interface {
 	Expire(key string, duration time.Duration) bool
 	ExpireTime(key string, duration time.Time) bool
 	GetMatchingKeys(pattern string) ([]string, error)
+	GetSortedSet(key string) (*SkipList[string], error)
 	GetOrMakeSortedSet(key string) (*SkipList[string], error)
 }
 
@@ -141,6 +142,18 @@ func (s *inMemoryStorage) GetMatchingKeys(pattern string) ([]string, error) {
 		}
 	}
 	return matchingKeys, nil
+}
+
+func (s *inMemoryStorage) GetSortedSet(key string) (*SkipList[string], error) {
+	value, exists := s.data[key]
+	if !exists {
+		return nil, ErrKeyNotFound
+	}
+	skipList, ok := value.(*SkipList[string])
+	if !ok {
+		return nil, ErrWrongType
+	}
+	return skipList, nil
 }
 
 func (s *inMemoryStorage) GetOrMakeSortedSet(key string) (*SkipList[string], error) {

@@ -109,6 +109,8 @@ func EncodeResp(val any) []byte {
 		return fmt.Appendf(nil, ":%d\r\n", v)
 	case int64:
 		return fmt.Appendf(nil, ":%d\r\n", v)
+	case float64:
+		return EncodeBulkString(fmt.Sprintf("%g", val))
 	case []string:
 		return EncodeArray(v)
 	case [](any):
