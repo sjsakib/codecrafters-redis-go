@@ -112,6 +112,12 @@ func (s *SkipList[T]) Range(start, stop int) []T {
 	return result
 }
 
+func (s *SkipList[T]) GetScore(value T) (float64, bool) {
+	score, exists := s.scoreMap[value]
+	return score, exists
+}
+
+
 func (s *SkipList[T]) insert(score float64, value T) {
 	ground := s.floors[0]
 	node := &Node[T]{

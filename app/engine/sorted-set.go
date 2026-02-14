@@ -85,4 +85,24 @@ func (e *engine) handleZCard(command []string) []byte {
 	return resp.EncodeResp(int64(sortedSet.Size()))
 }
 
+func (e *engine) handleZScore(command []string) []byte {
+	if len(command) < 3 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'ZSCORE' command")
+	}
+	key := command[1]
+	sortedSet, err := e.storage.GetOrMakeSortedSet(key)
+	if err != nil {
+		return resp.EncodeErrorMessage(err.Error())
+	}
+	
+	member := command[2]
+	score, exists := sortedSet.GetScore(member)
+	if !exists {
+		return resp.EncodeNull()
+	}
+	return resp.EncodeResp(score)
+}
+
+
+
 
