@@ -45,7 +45,7 @@ func TestSkipList_Rank(t *testing.T) {
 	skipList.Add(1.0, "1")
 	skipList.Add(2.0, "2")
 	skipList.Add(3.0, "3")
-	
+
 	rank := skipList.Rank("2")
 	if rank != 1 {
 		t.Errorf("expected rank 1 for value 2, got %d", rank)
@@ -62,7 +62,7 @@ func TestSkipList_remove(t *testing.T) {
 	skipList.insert(1.0, "1")
 	skipList.insert(2.0, "2")
 	skipList.insert(3.0, "3")
-	
+
 	removed := skipList.delete("2")
 	if !removed {
 		t.Errorf("expected to remove value 2, but it was not removed")
@@ -82,7 +82,7 @@ func TestSkipList_remove(t *testing.T) {
 	if skipList.floors[0].tail.value != "3" {
 		t.Errorf("expected tail value 3 after removal, got %s", skipList.floors[0].tail.value)
 	}
-	
+
 	removed = skipList.delete("4")
 	if removed {
 		t.Errorf("expected to not remove value 4, but it was removed")

@@ -30,3 +30,21 @@ func (e *engine) handleZAdd(command []string) []byte {
 
 	return resp.EncodeResp(int64(addedCount))
 }
+
+func (e *engine) handleZRank(command []string) []byte {
+	if len(command) < 3 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'ZRANK' command")
+	}
+	key := command[1]
+	sortedSet, err := e.storage.GetOrMakeSortedSet(key)
+	if err != nil {
+		return resp.EncodeErrorMessage(err.Error())
+	}
+	
+	member := command[2]
+	rank := sortedSet.Rank(member)
+	if rank == -1 {
+		return resp.EncodeNull()
+	}
+	return resp.EncodeResp(int64(rank))
+}

@@ -219,6 +219,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleUnsubscribe(req)
 	case CmdZAdd:
 		response.Data = e.handleZAdd(command)
+	case CmdZRank:
+		response.Data = e.handleZRank(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}

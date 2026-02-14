@@ -59,8 +59,8 @@ func NewSkipList[T comparable]() *SkipList[T] {
 }
 
 func (s *SkipList[T]) Add(score float64, value T) bool {
-	score, exists := s.scoreMap[value]
-	if exists && score == score {
+	existingScore, exists := s.scoreMap[value]
+	if exists && score == existingScore {
 		return false
 	}
 	if exists {
@@ -68,7 +68,7 @@ func (s *SkipList[T]) Add(score float64, value T) bool {
 	}
 	s.insert(score, value)
 	s.scoreMap[value] = score
-	return true
+	return !exists
 }
 
 func (s *SkipList[T]) Rank(value T) int {
@@ -104,15 +104,18 @@ func (s *SkipList[T]) insert(score float64, value T) {
 	}
 
 	cur := ground.head
-	for cur.next != nil && cur.next.Compare(node) < 0 {
-		cur = cur.next
-	}
 
-	if cur.Compare(node) >= 0 {
+	if cur.Compare(node) > 0 {
 		node.next = cur
 		node.prev = cur.prev
 		cur.prev = node
 		ground.head = node
+
+		return
+	}
+
+	for cur.next != nil && cur.next.Compare(node) < 0 {
+		cur = cur.next
 	}
 
 	node.next = cur.next
