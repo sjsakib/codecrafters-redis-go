@@ -217,6 +217,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handlePub(command)
 	case CmdUnsubscribe:
 		response.Data = e.handleUnsubscribe(req)
+	case CmdZAdd:
+		response.Data = e.handleZAdd(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}

@@ -34,4 +34,10 @@ const (
 	CmdPSubscribe   Command = "PSUBSCRIBE"
 	CmdPUnsubscribe Command = "PUNSUBSCRIBE"
 	CmdQuit         Command = "QUIT"
+	CmdZAdd         Command = "ZADD"
+	CmdZRange       Command = "ZRANGE"
+	CmdZRank        Command = "ZRANK"
+	CmdZCard        Command = "ZCARD"
+	CmdZScore       Command = "ZSCORE"
+	CmdZRem         Command = "ZREM"
 )
