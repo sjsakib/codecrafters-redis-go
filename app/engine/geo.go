@@ -7,10 +7,26 @@ import (
 	"github.com/codecrafters-io/redis-starter-go/app/resp"
 )
 
+const (
+	MAX_LATITUDE  = 85.05112878
+	MIN_LATITUDE  = -85.05112878
+	LATITUDE_RANGE = MAX_LATITUDE - MIN_LATITUDE
+	MAX_LONGITUDE = 180.0
+	MIN_LONGITUDE = -180.0
+	LONGITUDE_RANGE = MAX_LONGITUDE - MIN_LONGITUDE
+)
+
 type Location struct {
-	Label string
+	Label     string
 	Longitude float64
 	Latitude  float64
+}
+
+func (l Location) Score() float64 {
+	normalizedLongitude := int64(((l.Longitude - MIN_LONGITUDE) / LONGITUDE_RANGE) * (1 << 26))
+	normalizedLatitude := int64(((l.Latitude - MIN_LATITUDE) / LATITUDE_RANGE) * (1 << 26))
+
+	return interleave(normalizedLatitude, normalizedLongitude)
 }
 
 func (e *engine) handleGeoAdd(command []string) []byte {
@@ -33,9 +49,9 @@ func (e *engine) handleGeoAdd(command []string) []byte {
 		if err != nil {
 			return resp.EncodeErrorMessage("latitude must be a float")
 		}
-		
-		isLatValid := latitude >= -85.05112878 && latitude <= 85.05112878
-		isLongValid := longitude >= -180 && longitude <= 180
+
+		isLatValid := latitude >= MIN_LATITUDE && latitude <= MAX_LATITUDE
+		isLongValid := longitude >= MIN_LONGITUDE && longitude <= MAX_LONGITUDE
 		if !isLatValid || !isLongValid {
 			return resp.EncodeErrorMessage(fmt.Sprintf("invalid longitude,latitude pair %f,%f", longitude, latitude))
 		}
@@ -43,7 +59,7 @@ func (e *engine) handleGeoAdd(command []string) []byte {
 		location.Longitude = longitude
 		location.Latitude = latitude
 		location.Label = command[i+2]
-		score := float64(0)
+		score := location.Score()
 		if set.Add(score, location.Label) {
 			addedCount++
 		}
@@ -51,4 +67,24 @@ func (e *engine) handleGeoAdd(command []string) []byte {
 	}
 
 	return resp.EncodeResp(addedCount)
+}
+
+func interleave(x int64, y int64) float64 {
+	x = spreadBits(x)
+	y = spreadBits(y)
+
+	y_shifted := y << 1
+
+	return float64(x | y_shifted)
+}
+func spreadBits(x int64) int64 {
+	x &= 0xFFFFFFFF
+
+	x = (x | (x << 16)) & 0x0000FFFF0000FFFF
+	x = (x | (x << 8)) & 0x00FF00FF00FF00FF
+	x = (x | (x << 4)) & 0x0F0F0F0F0F0F0F0F
+	x = (x | (x << 2)) & 0x3333333333333333
+	x = (x | (x << 1)) & 0x5555555555555555
+
+	return x
 }
