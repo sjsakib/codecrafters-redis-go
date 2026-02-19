@@ -40,4 +40,5 @@ const (
 	CmdZCard        Command = "ZCARD"
 	CmdZScore       Command = "ZSCORE"
 	CmdZRem         Command = "ZREM"
+	CmdGeoAdd       Command = "GEOADD"
 )

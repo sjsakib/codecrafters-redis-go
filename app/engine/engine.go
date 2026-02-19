@@ -229,7 +229,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleZScore(command)
 	case CmdZRem:
 		response.Data = e.handleZRem(command)
-		
+	case CmdGeoAdd:
+		response.Data = e.handleGeoAdd(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}
