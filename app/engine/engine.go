@@ -46,7 +46,8 @@ type engine struct {
 	subCount map[string]int
 
 	// acl
-	users map[string]*User
+	users       map[string]*User
+	connUserMap map[string]*User
 }
 
 func NewEngine(storage storage.Storage, masterAddress string) Engine {
@@ -67,6 +68,7 @@ func NewEngine(storage storage.Storage, masterAddress string) Engine {
 		channels:    make(map[string][]*Request),
 		subCount:    make(map[string]int),
 		users:       make(map[string]*User),
+		connUserMap: make(map[string]*User),
 	}
 }
 
@@ -77,9 +79,9 @@ func (e *engine) SetConfig(config Config) {
 func (e *engine) StartLoop() error {
 
 	e.users["default"] = &User{
-		Username: "default",
+		Username:  "default",
 		Passwords: []string{},
-		Flags:    map[string]bool{"nopass": true},
+		Flags:     map[string]bool{"nopass": true},
 	}
 
 	err := e.LoadRDBFileIfPresent()
@@ -123,6 +125,13 @@ func (e *engine) Handle(req *Request) *Response {
 		}
 
 		req.Command = command
+	}
+
+	if !e.checkAuth(req) {
+		response.Data = resp.EncodeError(resp.ErrNoAuth)
+		req.ResCh <- &response
+		close(req.ResCh)
+		return &response
 	}
 
 	if e.queueIfMulti(req) {
@@ -250,7 +259,7 @@ func (e *engine) Handle(req *Request) *Response {
 	case CmdAcl:
 		response.Data = e.handleAcl(command)
 	case CmdAuth:
-		response.Data = e.handleAuth(command)
+		response.Data = e.handleAuth(req)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}

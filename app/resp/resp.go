@@ -15,6 +15,7 @@ import (
 const intFmtStr = "%d\r\n"
 
 var ErrWrongPass = errors.New("invalid username-password pair or user is disabled.")
+var ErrNoAuth = errors.New("Authentication required.")
 
 type CmdWithLen struct {
 	Command []string
@@ -170,6 +171,8 @@ func EncodeError(err error) []byte {
 		return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n")
 	case ErrWrongPass:
 		return []byte("-WRONGPASS " + err.Error() + "\r\n")
+	case ErrNoAuth:
+		return []byte("-NOAUTH " + err.Error() + "\r\n")
 	case storage.ErrKeyNotFound:
 		return []byte("$-1\r\n")
 	default:

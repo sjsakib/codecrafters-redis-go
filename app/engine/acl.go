@@ -3,6 +3,7 @@ package engine
 import (
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/app/resp"
@@ -73,7 +74,8 @@ func (e *engine) handleSetUser(command []string) []byte {
 	return resp.EncodeOK()
 }
 
-func (e *engine) handleAuth(command []string) []byte {
+func (e *engine) handleAuth(request *Request) []byte {
+	command := request.Command
 	if len(command) != 3 {
 		return resp.EncodeErrorMessage("wrong number of arguments for 'AUTH' command")
 	}
@@ -83,12 +85,24 @@ func (e *engine) handleAuth(command []string) []byte {
 	if !exists {
 		return resp.EncodeError(resp.ErrWrongPass)
 	}
-	for _, storedPassword := range user.Passwords {
-		if storedPassword == password {
-			return resp.EncodeOK()
-		}
+	if slices.Contains(user.Passwords, password) {
+		e.connUserMap[request.ConnId] = user
+		return resp.EncodeOK()
 	}
 	return resp.EncodeError(resp.ErrWrongPass)
+}
+
+func (e *engine) checkAuth(request *Request) bool {
+	user := e.connUserMap[request.ConnId]
+	if user != nil {
+		return true
+	}
+	user = e.users["default"]
+	if user.Flags["nopass"] {
+		e.connUserMap[request.ConnId] = user
+		return true
+	}
+	return false
 }
 
 func hashPassword(password string) string {
