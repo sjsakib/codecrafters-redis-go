@@ -45,4 +45,5 @@ const (
 	CmdGeoDist      Command = "GEODIST"
 	CmdGeoSearch    Command = "GEOSEARCH"
 	CmdAcl          Command = "ACL"
+	CmdAuth         Command = "AUTH"
 )

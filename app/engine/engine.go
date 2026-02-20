@@ -249,6 +249,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleGeoSearch(command)
 	case CmdAcl:
 		response.Data = e.handleAcl(command)
+	case CmdAuth:
+		response.Data = e.handleAuth(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}

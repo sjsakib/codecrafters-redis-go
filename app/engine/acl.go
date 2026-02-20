@@ -73,6 +73,26 @@ func (e *engine) handleSetUser(command []string) []byte {
 	return resp.EncodeOK()
 }
 
+func (e *engine) handleAuth(command []string) []byte {
+	if len(command) != 3 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'AUTH' command")
+	}
+	username := command[1]
+	password := hashPassword(command[2])
+	user, exists := e.users[username]
+	if !exists {
+		return resp.EncodeErrorMessage("invalid username-password pair or user is disabled")
+	}
+	for _, storedPassword := range user.Passwords {
+		if storedPassword == password {
+			return resp.EncodeOK()
+		}
+	}
+	return resp.EncodeErrorMessage("invalid username-password pair or user is disabled")
+}
+
+
+
 func hashPassword(password string) string {
 	sha256Hash := sha256.Sum256([]byte(password))
 	return fmt.Sprintf("%x", sha256Hash)
