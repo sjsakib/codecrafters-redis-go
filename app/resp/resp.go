@@ -2,6 +2,7 @@ package resp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -12,6 +13,8 @@ import (
 )
 
 const intFmtStr = "%d\r\n"
+
+var ErrWrongPass = errors.New("invalid username-password pair or user is disabled.")
 
 type CmdWithLen struct {
 	Command []string
@@ -165,6 +168,8 @@ func EncodeError(err error) []byte {
 	switch err {
 	case storage.ErrWrongType:
 		return []byte("-WRONGTYPE Operation against a key holding the wrong kind of value\r\n")
+	case ErrWrongPass:
+		return []byte("-WRONGPASS " + err.Error() + "\r\n")
 	case storage.ErrKeyNotFound:
 		return []byte("$-1\r\n")
 	default:

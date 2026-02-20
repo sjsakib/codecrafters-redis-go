@@ -81,17 +81,15 @@ func (e *engine) handleAuth(command []string) []byte {
 	password := hashPassword(command[2])
 	user, exists := e.users[username]
 	if !exists {
-		return resp.EncodeErrorMessage("invalid username-password pair or user is disabled")
+		return resp.EncodeError(resp.ErrWrongPass)
 	}
 	for _, storedPassword := range user.Passwords {
 		if storedPassword == password {
 			return resp.EncodeOK()
 		}
 	}
-	return resp.EncodeErrorMessage("invalid username-password pair or user is disabled")
+	return resp.EncodeError(resp.ErrWrongPass)
 }
-
-
 
 func hashPassword(password string) string {
 	sha256Hash := sha256.Sum256([]byte(password))
