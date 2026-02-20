@@ -42,4 +42,5 @@ const (
 	CmdZRem         Command = "ZREM"
 	CmdGeoAdd       Command = "GEOADD"
 	CmdGeoPos       Command = "GEOPOS"
+	CmdGeoDist      Command = "GEODIST"
 )

@@ -5,29 +5,8 @@ import (
 	"strconv"
 
 	"github.com/codecrafters-io/redis-starter-go/app/resp"
+	"github.com/codecrafters-io/redis-starter-go/app/utils"
 )
-
-const (
-	MAX_LATITUDE    = 85.05112878
-	MIN_LATITUDE    = -85.05112878
-	LATITUDE_RANGE  = MAX_LATITUDE - MIN_LATITUDE
-	MAX_LONGITUDE   = 180.0
-	MIN_LONGITUDE   = -180.0
-	LONGITUDE_RANGE = MAX_LONGITUDE - MIN_LONGITUDE
-)
-
-type Location struct {
-	Label     string
-	Longitude float64
-	Latitude  float64
-}
-
-func (l Location) Score() float64 {
-	normalizedLongitude := int64(((l.Longitude - MIN_LONGITUDE) / LONGITUDE_RANGE) * (1 << 26))
-	normalizedLatitude := int64(((l.Latitude - MIN_LATITUDE) / LATITUDE_RANGE) * (1 << 26))
-
-	return interleave(normalizedLatitude, normalizedLongitude)
-}
 
 func (e *engine) handleGeoAdd(command []string) []byte {
 	if len(command) < 5 || (len(command)-2)%3 != 0 {
@@ -40,7 +19,6 @@ func (e *engine) handleGeoAdd(command []string) []byte {
 		return resp.EncodeErrorMessage(err.Error())
 	}
 	for i := 2; i < len(command); i += 3 {
-		var location Location
 		longitude, err := strconv.ParseFloat(command[i], 64)
 		if err != nil {
 			return resp.EncodeErrorMessage("longitude must be a float")
@@ -50,17 +28,14 @@ func (e *engine) handleGeoAdd(command []string) []byte {
 			return resp.EncodeErrorMessage("latitude must be a float")
 		}
 
-		isLatValid := latitude >= MIN_LATITUDE && latitude <= MAX_LATITUDE
-		isLongValid := longitude >= MIN_LONGITUDE && longitude <= MAX_LONGITUDE
-		if !isLatValid || !isLongValid {
+		location := utils.NewLocation(longitude, latitude)
+
+		if !location.IsValid() {
 			return resp.EncodeErrorMessage(fmt.Sprintf("invalid longitude,latitude pair %f,%f", longitude, latitude))
 		}
 
-		location.Longitude = longitude
-		location.Latitude = latitude
-		location.Label = command[i+2]
 		score := location.Score()
-		if set.Add(score, location.Label) {
+		if set.Add(score, command[i+2]) {
 			addedCount++
 		}
 
@@ -86,59 +61,45 @@ func (e *engine) handleGeopos(command []string) []byte {
 			results[i] = resp.EncodeNullArray()
 			continue
 		}
-		longitude, latitude := decodeGeoScore(score)
-		results[i] = []float64{longitude, latitude}
+		loc := utils.NewLocationFromScore(score)
+		if !loc.IsValid() {
+			results[i] = resp.EncodeNullArray()
+			continue
+		}
+		results[i] = []float64{loc.Longitude, loc.Latitude}
 	}
 
 	return resp.EncodeResp(results)
 }
 
-func decodeGeoScore(geoScore float64) (float64, float64) {
-	normalizedLatitude, normalizedLongitude := deinterleave(geoScore)
-	lonMin := (float64(normalizedLongitude)*LONGITUDE_RANGE)/(1<<26) + MIN_LONGITUDE
-	lonMax := (float64(normalizedLongitude+1)*LONGITUDE_RANGE)/(1<<26) + MIN_LONGITUDE
-	latMin := (float64(normalizedLatitude)*LATITUDE_RANGE)/(1<<26) + MIN_LATITUDE
-	latMax := (float64(normalizedLatitude+1)*LATITUDE_RANGE)/(1<<26) + MIN_LATITUDE
+func (e *engine) handleGeoDist(command []string) []byte {
+	if len(command) != 4 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'GEODIST' command")
+	}
+	key := command[1]
+	set, err := e.storage.GetOrMakeSortedSet(key)
+	if err != nil {
+		return resp.EncodeErrorMessage(err.Error())
+	}
+	
+	member1 := command[2]
+	member2 := command[3]
+	
+	score1, exists1 := set.GetScore(member1)
+	score2, exists2 := set.GetScore(member2)
+	if !exists1 || !exists2 {
+		return resp.EncodeNull()
+	}
+	loc1 := utils.NewLocationFromScore(score1)
+	loc2 := utils.NewLocationFromScore(score2)
 
-	return (lonMax + lonMin) / 2, (latMax + latMin) / 2
+	if !loc1.IsValid() || !loc2.IsValid() {
+		return resp.EncodeNull()
+	}
+
+
+	return resp.EncodeResp(loc1.DistanceTo(loc2))
 }
 
-func interleave(x int64, y int64) float64 {
-	x = spreadBits(x)
-	y = spreadBits(y)
 
-	y_shifted := y << 1
 
-	return float64(x | y_shifted)
-}
-
-func deinterleave(z float64) (int64, int64) {
-	zInt := int64(z)
-	x := compactBits(zInt)
-	y := compactBits(zInt >> 1)
-
-	return x, y
-}
-
-func spreadBits(x int64) int64 {
-	x &= 0xFFFFFFFF
-
-	x = (x | (x << 16)) & 0x0000FFFF0000FFFF
-	x = (x | (x << 8)) & 0x00FF00FF00FF00FF
-	x = (x | (x << 4)) & 0x0F0F0F0F0F0F0F0F
-	x = (x | (x << 2)) & 0x3333333333333333
-	x = (x | (x << 1)) & 0x5555555555555555
-
-	return x
-}
-
-func compactBits(x int64) int64 {
-	x &= 0x5555555555555555
-	x = (x | (x >> 1)) & 0x3333333333333333
-	x = (x | (x >> 2)) & 0x0F0F0F0F0F0F0F0F
-	x = (x | (x >> 4)) & 0x00FF00FF00FF00FF
-	x = (x | (x >> 8)) & 0x0000FFFF0000FFFF
-	x = (x | (x >> 16)) & 0x00000000FFFFFFFF
-
-	return x
-}
