@@ -24,6 +24,7 @@ func (e *engine) handleAcl(command []string) []byte {
 		}
 		return resp.EncodeResp([]any{
 			"flags", []string{"nopass"},
+			"passwords", []string{},
 		})
 	default:
 		return resp.EncodeErrorMessage(fmt.Sprintf("unknown ACL subcommand '%s'", subcommand))
