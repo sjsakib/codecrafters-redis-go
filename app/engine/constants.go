@@ -43,4 +43,5 @@ const (
 	CmdGeoAdd       Command = "GEOADD"
 	CmdGeoPos       Command = "GEOPOS"
 	CmdGeoDist      Command = "GEODIST"
+	CmdGeoSearch	Command = "GEOSEARCH"
 )

@@ -235,6 +235,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleGeopos(command)
 	case CmdGeoDist:
 		response.Data = e.handleGeoDist(command)
+	case CmdGeoSearch:
+		response.Data = e.handleGeoSearch(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}
@@ -1183,14 +1185,14 @@ func (e *engine) handlePub(command []string) []byte {
 	if len(command) < 3 {
 		return resp.EncodeInvalidArgCount(command[0])
 	}
-	
+
 	channel := command[1]
 	message := command[2]
 	subscribers, exists := e.channels[channel]
 	if !exists {
 		return resp.EncodeResp(0)
 	}
-	
+
 	for _, subscriber := range subscribers {
 		response := Response{}
 		response.Data = resp.EncodeResp([]any{"message", channel, message})
@@ -1204,7 +1206,7 @@ func (e *engine) handleUnsubscribe(req *Request) []byte {
 	if len(command) < 2 {
 		return resp.EncodeInvalidArgCount(command[0])
 	}
-	
+
 	channels := command[1:]
 	subCount, exists := e.subCount[req.ConnId]
 	if !exists {
@@ -1215,7 +1217,7 @@ func (e *engine) handleUnsubscribe(req *Request) []byte {
 		if !exists {
 			subscribers = make([]*Request, 0)
 		}
-		
+
 		newSubscribers := make([]*Request, 0)
 		for _, subscriber := range subscribers {
 			if subscriber.ConnId == req.ConnId {
@@ -1226,7 +1228,7 @@ func (e *engine) handleUnsubscribe(req *Request) []byte {
 			}
 		}
 		e.channels[channel] = newSubscribers
-		
+
 		response := Response{}
 		response.Data = resp.EncodeResp([]any{"unsubscribe", channel, subCount})
 		req.ResCh <- &response
