@@ -44,6 +44,9 @@ type engine struct {
 	// pub/sub
 	channels map[string][]*Request
 	subCount map[string]int
+
+	// acl
+	users map[string]*User
 }
 
 func NewEngine(storage storage.Storage, masterAddress string) Engine {
@@ -63,6 +66,7 @@ func NewEngine(storage storage.Storage, masterAddress string) Engine {
 		ackMap:      make(map[string]*WaitReq),
 		channels:    make(map[string][]*Request),
 		subCount:    make(map[string]int),
+		users:       make(map[string]*User),
 	}
 }
 
@@ -71,6 +75,12 @@ func (e *engine) SetConfig(config Config) {
 }
 
 func (e *engine) StartLoop() error {
+
+	e.users["default"] = &User{
+		Username: "default",
+		Passwords: []string{},
+		Flags:    map[string]bool{"nopass": true},
+	}
 
 	err := e.LoadRDBFileIfPresent()
 	if err != nil {

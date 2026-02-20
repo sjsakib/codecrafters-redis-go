@@ -172,6 +172,10 @@ func EncodeError(err error) []byte {
 	}
 }
 
+func EncodeOK() []byte {
+	return []byte("+OK\r\n")
+}
+
 func EncodeNull() []byte {
 	return []byte("$-1\r\n")
 }
