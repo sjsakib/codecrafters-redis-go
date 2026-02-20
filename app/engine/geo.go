@@ -95,10 +95,12 @@ func (e *engine) handleGeopos(command []string) []byte {
 
 func decodeGeoScore(geoScore float64) (float64, float64) {
 	normalizedLatitude, normalizedLongitude := deinterleave(geoScore)
-	longitude := float64(normalizedLongitude)*(LONGITUDE_RANGE/(1<<26)) + MIN_LONGITUDE
-	latitude := float64(normalizedLatitude)*(LATITUDE_RANGE/(1<<26)) + MIN_LATITUDE
+	lonMin := (float64(normalizedLongitude)*LONGITUDE_RANGE)/(1<<26) + MIN_LONGITUDE
+	lonMax := (float64(normalizedLongitude+1)*LONGITUDE_RANGE)/(1<<26) + MIN_LONGITUDE
+	latMin := (float64(normalizedLatitude)*LATITUDE_RANGE)/(1<<26) + MIN_LATITUDE
+	latMax := (float64(normalizedLatitude+1)*LATITUDE_RANGE)/(1<<26) + MIN_LATITUDE
 
-	return longitude, latitude
+	return (lonMax + lonMin) / 2, (latMax + latMin) / 2
 }
 
 func interleave(x int64, y int64) float64 {
