@@ -93,6 +93,10 @@ func (e *engine) handleAuth(request *Request) []byte {
 }
 
 func (e *engine) checkAuth(request *Request) bool {
+	command := request.Command
+	if len(command) > 0 && command[0] == string(CmdAuth) {
+		return true
+	}
 	user := e.connUserMap[request.ConnId]
 	if user != nil {
 		return true
