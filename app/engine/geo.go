@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	MAX_LATITUDE  = 85.05112878
-	MIN_LATITUDE  = -85.05112878
-	LATITUDE_RANGE = MAX_LATITUDE - MIN_LATITUDE
-	MAX_LONGITUDE = 180.0
-	MIN_LONGITUDE = -180.0
+	MAX_LATITUDE    = 85.05112878
+	MIN_LATITUDE    = -85.05112878
+	LATITUDE_RANGE  = MAX_LATITUDE - MIN_LATITUDE
+	MAX_LONGITUDE   = 180.0
+	MIN_LONGITUDE   = -180.0
 	LONGITUDE_RANGE = MAX_LONGITUDE - MIN_LONGITUDE
 )
 
@@ -69,6 +69,38 @@ func (e *engine) handleGeoAdd(command []string) []byte {
 	return resp.EncodeResp(addedCount)
 }
 
+func (e *engine) handleGeopos(command []string) []byte {
+	if len(command) < 3 {
+		return resp.EncodeErrorMessage("wrong number of arguments for 'GEOPOS' command")
+	}
+	key := command[1]
+	set, err := e.storage.GetOrMakeSortedSet(key)
+	if err != nil {
+		return resp.EncodeErrorMessage(err.Error())
+	}
+
+	results := make([]any, len(command)-2)
+	for i, member := range command[2:] {
+		score, exists := set.GetScore(member)
+		if !exists {
+			results[i] = resp.EncodeNullArray()
+			continue
+		}
+		longitude, latitude := decodeGeoScore(score)
+		results[i] = []float64{longitude, latitude}
+	}
+
+	return resp.EncodeResp(results)
+}
+
+func decodeGeoScore(geoScore float64) (float64, float64) {
+	normalizedLatitude, normalizedLongitude := deinterleave(geoScore)
+	longitude := float64(normalizedLongitude)*(LONGITUDE_RANGE/(1<<26)) + MIN_LONGITUDE
+	latitude := float64(normalizedLatitude)*(LATITUDE_RANGE/(1<<26)) + MIN_LATITUDE
+
+	return longitude, latitude
+}
+
 func interleave(x int64, y int64) float64 {
 	x = spreadBits(x)
 	y = spreadBits(y)
@@ -77,6 +109,15 @@ func interleave(x int64, y int64) float64 {
 
 	return float64(x | y_shifted)
 }
+
+func deinterleave(z float64) (int64, int64) {
+	zInt := int64(z)
+	x := compactBits(zInt)
+	y := compactBits(zInt >> 1)
+
+	return x, y
+}
+
 func spreadBits(x int64) int64 {
 	x &= 0xFFFFFFFF
 
@@ -85,6 +126,17 @@ func spreadBits(x int64) int64 {
 	x = (x | (x << 4)) & 0x0F0F0F0F0F0F0F0F
 	x = (x | (x << 2)) & 0x3333333333333333
 	x = (x | (x << 1)) & 0x5555555555555555
+
+	return x
+}
+
+func compactBits(x int64) int64 {
+	x &= 0x5555555555555555
+	x = (x | (x >> 1)) & 0x3333333333333333
+	x = (x | (x >> 2)) & 0x0F0F0F0F0F0F0F0F
+	x = (x | (x >> 4)) & 0x00FF00FF00FF00FF
+	x = (x | (x >> 8)) & 0x0000FFFF0000FFFF
+	x = (x | (x >> 16)) & 0x00000000FFFFFFFF
 
 	return x
 }

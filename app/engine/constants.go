@@ -41,4 +41,5 @@ const (
 	CmdZScore       Command = "ZSCORE"
 	CmdZRem         Command = "ZREM"
 	CmdGeoAdd       Command = "GEOADD"
+	CmdGeoPos       Command = "GEOPOS"
 )

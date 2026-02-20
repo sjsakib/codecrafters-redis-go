@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/app/storage"
@@ -111,12 +112,6 @@ func EncodeResp(val any) []byte {
 		return fmt.Appendf(nil, ":%d\r\n", v)
 	case float64:
 		return EncodeBulkString(fmt.Sprintf("%g", val))
-	case []string:
-		return EncodeArray(v)
-	case [](any):
-		return EncodeArray(v)
-	case []storage.StreamEntry:
-		return EncodeArray(v)
 	case []byte:
 		return v
 	case storage.StreamEntry:
@@ -134,7 +129,11 @@ func EncodeResp(val any) []byte {
 	case nil:
 		return EncodeResp(nil)
 	default:
-		return EncodeErrorMessage("failed to encode response: unknown type")
+		rv := reflect.ValueOf(val)
+		if rv.Kind() == reflect.Slice {
+			return EncodeArrayReflect(rv)
+		}
+		return EncodeErrorMessage(fmt.Sprintf("failed to encode response: unknown type %T", val))
 	}
 }
 
@@ -142,6 +141,17 @@ func EncodeArray[T any](items []T) []byte {
 	var buffer bytes.Buffer
 	fmt.Fprintf(&buffer, "*%d\r\n", len(items))
 	for _, item := range items {
+		buffer.Write(EncodeResp(item))
+	}
+	return buffer.Bytes()
+}
+
+func EncodeArrayReflect(rv reflect.Value) []byte {
+	var buffer bytes.Buffer
+	length := rv.Len()
+	fmt.Fprintf(&buffer, "*%d\r\n", length)
+	for i := range length {
+		item := rv.Index(i).Interface()
 		buffer.Write(EncodeResp(item))
 	}
 	return buffer.Bytes()
