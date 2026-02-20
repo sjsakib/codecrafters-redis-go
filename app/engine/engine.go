@@ -237,6 +237,8 @@ func (e *engine) Handle(req *Request) *Response {
 		response.Data = e.handleGeoDist(command)
 	case CmdGeoSearch:
 		response.Data = e.handleGeoSearch(command)
+	case CmdAcl:
+		response.Data = e.handleAcl(command)
 	default:
 		response.Data = resp.EncodeErrorMessage("unknown command: " + command[0])
 	}
